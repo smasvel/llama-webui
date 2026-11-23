@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app
-from hearth.storage import model_resource_warnings
-from hearth.storage import model_metadata_store
+from llama_web.storage import model_resource_warnings
+from llama_web.storage import model_metadata_store
 from playwright.sync_api import sync_playwright, expect
 from werkzeug.serving import make_server
 
@@ -58,7 +58,7 @@ with contextlib.ExitStack() as stack:
             warning.scroll_into_view_if_needed()
             assert page.locator('.console-body').evaluate('(e) => e.scrollWidth <= e.clientWidth'), width
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), width
-            page.screenshot(path=f'/tmp/hearth-model-warnings-{width}.png')
+            page.screenshot(path=f'/tmp/llama_web-model-warnings-{width}.png')
             warning.locator('summary').click()
         page.get_by_label('Filter models by name').fill('qwen3.8')
         expect(page.locator('.model-card2')).to_have_count(3)

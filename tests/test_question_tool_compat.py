@@ -4,8 +4,8 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from hearth.backends import lemonade_guard_shim as shim
-from hearth.compat import question_tool_compat as compat
+from llama_web.backends import lemonade_guard_shim as shim
+from llama_web.compat import question_tool_compat as compat
 from tools.opencode_scenarios import QUESTION, question
 from tools.test_flm_model import decode, run_suite
 

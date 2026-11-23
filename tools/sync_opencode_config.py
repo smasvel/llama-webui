@@ -1,4 +1,4 @@
-"""Print ~/.config/opencode/opencode.jsonc content from Hearth's live backends.
+"""Print ~/.config/opencode/opencode.jsonc content from llama_web's live backends.
 
 Run manually or from deploy/opencode-config-sync.timer so the desktop OpenCode
 config can be refreshed from current model context limits and formula-derived
@@ -18,8 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from hearth.core import help_data
-from hearth.backends import q38rocm_client
+from llama_web.core import help_data
+from llama_web.backends import q38rocm_client
 
 CONFIG_PATH = Path.home() / '.config/opencode/opencode.jsonc'
 
@@ -77,7 +77,7 @@ def main() -> int:
 
     if existing:
         # Keep the current model only while it remains in the live catalog. This
-        # avoids pinning OpenCode to a removed model after Hearth refreshes providers.
+        # avoids pinning OpenCode to a removed model after llama_web refreshes providers.
         old_model = existing.get('model')
         old_provider, separator, old_model_id = str(old_model or '').partition('/')
         available_models = ((config.get('provider') or {}).get(old_provider) or {}).get('models') or {}

@@ -1,15 +1,15 @@
-"""Playwright smoke test for Hearth Downloads search results.
+"""Playwright smoke test for llama_web Downloads search results.
 
 Usage:
-    HEARTH_URL=https://localhost:8443 python tools/test_downloads_search_playwright.py
+    LLAMA_WEB_URL=https://localhost:8443 python tools/test_downloads_search_playwright.py
 """
 
 import os
 from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("HEARTH_URL", "https://localhost:5443")
-USERNAME = os.environ.get("HEARTH_USER")
-PASSWORD = os.environ.get("HEARTH_PASSWORD")
+BASE_URL = os.environ.get("LLAMA_WEB_URL", "https://localhost:5443")
+USERNAME = os.environ.get("LLAMA_WEB_USER")
+PASSWORD = os.environ.get("LLAMA_WEB_PASSWORD")
 if not PASSWORD:
     creds_path = os.path.join(os.path.dirname(__file__), "..", "test-user")
     if os.path.isfile(creds_path):
@@ -18,7 +18,7 @@ if not PASSWORD:
             USERNAME = USERNAME or lines[0]
             PASSWORD = lines[1]
 if not USERNAME or not PASSWORD:
-    raise SystemExit("Set HEARTH_USER and HEARTH_PASSWORD (or create robotest-credentials).")
+    raise SystemExit("Set LLAMA_WEB_USER and LLAMA_WEB_PASSWORD (or create robotest-credentials).")
 
 
 def main():
@@ -53,7 +53,7 @@ def main():
         lm_cards = page.locator("#lmstudio-results .result-card, #lmstudio-results .download-card, #lmstudio-results .model-card").count()
         print("LM Studio result cards:", lm_cards)
 
-        # Compare identifiable public catalog examples with Hearth's rendered search.
+        # Compare identifiable public catalog examples with llama_web's rendered search.
         for backend, query, public_text, expected in (
             ("lemonade", "nemotron", lemonade_public, "NVIDIA-Nemotron-3.5-Lightning"),
             ("lemonade", "Muse Glimmer", lemonade_public, "unsloth/Muse-Glimmer-30B-GGUF"),
@@ -65,10 +65,10 @@ def main():
                 return await response.json();
             }""", {"backend": backend, "query": query})
             names = [item.get("catalog_name") or item.get("id") for item in data.get("results", [])]
-            print(f"{backend} {query!r}: public={'yes' if query.split()[0].lower() in public_text.lower() else 'no'}, Hearth={len(names)} results, examples={names[:5]}")
+            print(f"{backend} {query!r}: public={'yes' if query.split()[0].lower() in public_text.lower() else 'no'}, llama_web={len(names)} results, examples={names[:5]}")
             assert any(expected.casefold() in str(item.get("id", "")).casefold() or
                        expected.casefold() in str(item.get("catalog_name", "")).casefold()
-                       for item in data.get("results", [])), f"Hearth missed {expected}"
+                       for item in data.get("results", [])), f"llama_web missed {expected}"
 
         page.fill("#catalog-search-input", "Muse Glimmer")
         page.click("#catalog-search-btn")

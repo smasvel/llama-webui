@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from hearth.backends import flm_tool_shim
+from llama_web.backends import flm_tool_shim
 
 
 TOOLS_BODY = {

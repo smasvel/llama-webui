@@ -1,6 +1,6 @@
 import unittest
 
-from hearth.agents import agent_request_policy
+from llama_web.agents import agent_request_policy
 
 
 class ExplicitStopPolicyTests(unittest.TestCase):

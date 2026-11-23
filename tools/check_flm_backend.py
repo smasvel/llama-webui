@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from hearth.backends import flm_backend_profile as profile
+from llama_web.backends import flm_backend_profile as profile
 
 
 def flm_json(flm_bin, flm_dir, args):

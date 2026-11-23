@@ -1,4 +1,4 @@
-"""Generate Hearth's authenticated Caddy model gateway.
+"""Generate llama_web's authenticated Caddy model gateway.
 
 The gateway used to be assembled by hand: three bearer tokens pasted into a
 ``(client_auth)`` snippet, five port blocks copied from the docs, and Caddy's local CA
@@ -37,9 +37,9 @@ TOKEN_LABELS = ("opencode", "vscode", "lan")
 
 # Older releases appended the snippet under a bare marker with no end marker. Treat that
 # as "already installed" and never append a second copy.
-LEGACY_MARKER = "# Hearth authenticated backend proxies"
-BEGIN_MARKER = "# BEGIN Hearth authenticated backend proxies"
-END_MARKER = "# END Hearth authenticated backend proxies"
+LEGACY_MARKER = "# llama_web authenticated backend proxies"
+BEGIN_MARKER = "# BEGIN llama_web authenticated backend proxies"
+END_MARKER = "# END llama_web authenticated backend proxies"
 
 TOKEN_PATTERN = re.compile(r'@(\w+)\s+header\s+Authorization\s+"Bearer\s+([A-Za-z0-9]+)"')
 ADDRESS_PATTERN = re.compile(r"^\d+:\s+(\S+)\s+inet (\d+\.\d+\.\d+\.\d+)/")
@@ -129,7 +129,7 @@ def managed_section(text: str) -> str:
 
 
 def install_section(existing: str, section: str) -> str:
-    """Add or replace the Hearth block in a system Caddyfile, preserving everything else.
+    """Add or replace the llama_web block in a system Caddyfile, preserving everything else.
 
     Returns the text unchanged when an older release's marker is present, because that
     layout has no end marker and rewriting it could silently drop administrator edits.
@@ -275,10 +275,10 @@ def export_ca(destination: Path) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Generate Hearth's Caddy gateway tokens, configuration, and local CA.")
+        description="Generate llama_web's Caddy gateway tokens, configuration, and local CA.")
     parser.add_argument("--state-file", type=Path,
                         help="Gateway config kept in the user's data dir "
-                             "(default: ~/.local/share/hearth/Caddyfile).")
+                             "(default: ~/.local/share/llama_web/Caddyfile).")
     parser.add_argument("--owner", help="chown the generated files to this account (root only).")
     parser.add_argument("--system-file", type=Path,
                         help="Install into this Caddyfile (typically /etc/caddy/Caddyfile).")
@@ -287,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Write the system Caddyfile but skip reloading, cert priming, and CA export.")
     args = parser.parse_args(argv)
 
-    state_file = args.state_file or Path.home() / ".local/share/hearth/Caddyfile"
+    state_file = args.state_file or Path.home() / ".local/share/llama_web/Caddyfile"
     existing = state_file.read_text() if state_file.exists() else ""
     if existing:
         # Preserve gateway tokens and custom routes while making the current host
@@ -325,13 +325,13 @@ def main(argv: list[str] | None = None) -> int:
     updated = install_section(current, text)
     if updated != current:
         if current.strip():
-            backup = system_file.with_name(system_file.name + ".before-hearth")
+            backup = system_file.with_name(system_file.name + ".before-llama_web")
             if not backup.exists():
                 _write(backup, current)
         _write(system_file, updated)
-        print(f"Installed the Hearth gateway block in {system_file}")
+        print(f"Installed the llama_web gateway block in {system_file}")
     elif LEGACY_MARKER in current and BEGIN_MARKER not in current:
-        print(f"{system_file} already has the Hearth gateway block; leaving it untouched.")
+        print(f"{system_file} already has the llama_web gateway block; leaving it untouched.")
     _ensure_log_dir()
     if not _validate_caddy(system_file):
         return 1
@@ -341,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _prime_certificates()
-    ca_file = state_file.with_name("hearth-ca.crt")
+    ca_file = state_file.with_name("llama_web-ca.crt")
     if export_ca(ca_file):
         _chown(ca_file, args.owner)
         print(f"Caddy local CA exported: {ca_file}")

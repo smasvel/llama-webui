@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock
 
-from hearth.backends import flm_tool_shim as shim
+from llama_web.backends import flm_tool_shim as shim
 from tools.test_flm_model import decode
 
 

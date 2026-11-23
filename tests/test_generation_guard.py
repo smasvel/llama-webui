@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from hearth.core import generation_guard
+from llama_web.core import generation_guard
 
 
 def chunk(text):

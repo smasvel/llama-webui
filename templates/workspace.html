@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="csrf-token" content="{{ session.csrf }}"><script src="/static/csrf.js"></script>
+<title>{{ pages.get(page,'Chat') }} — llama-web</title>
+<link rel="stylesheet" href="{{ url_for('static',filename='style.css') }}">
+{% if page=='live-logs' %}<meta http-equiv="refresh" content="10">{% endif %}
+</head><body>
+{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ session.csrf }}">{% endmacro %}
+{% macro signout() %}<span class="hint">{{ g.user.username }}</span><form method="post" action="/logout" class="logout-form">{{ csrf() }}<button class="logout-button hint">Sign out</button></form>{% endmacro %}
+<div class="app">
+{% if page=='chat' %}
+<div id="sidebar-overlay" class="sidebar-overlay"></div><aside id="sidebar" class="sidebar"><div class="sidebar-header"><h1>Chats</h1><a href="/" class="icon-btn" aria-label="New chat">+</a></div>
+<div id="chat-history-list" class="model-list">{% for c in chats %}<a class="history-item {{ 'active' if request.args.get('chat') == c.id|string }}" href="/?chat={{ c.id }}"><span class="history-item-title">{{ c.title }}</span></a>{% endfor %}</div>
+<div class="sidebar-footer">{{ signout() }}</div></aside>
+{% endif %}
+<main class="chat"><header class="chat-header">
+{% if page=='chat' %}
+<button id="menu-toggle" class="icon-btn menu-toggle" title="Menu" aria-label="Menu">☰</button>
+<select id="model-select" aria-label="Loaded model" {% if not models %}disabled{% endif %}>{% for model in models %}<option>{{ model }}</option>{% else %}<option>No model loaded</option>{% endfor %}</select>
+{% if g.user.role=='admin' %}<div id="system-stats" class="system-stats" title="System CPU, RAM and disk usage"><span id="stat-cpu">CPU –</span><span id="stat-ram">RAM –</span><span id="stat-disk">Disk –</span><span id="stat-temp"></span></div>{% endif %}
+<div class="chat-header-actions">
+{% if g.user.role=='admin' %}{% for slug,title in pages.items() %}<a class="icon-btn text-icon-btn" href="/{{ slug }}">{{ title }}</a>{% endfor %}{% endif %}
+<label class="hint temp-label" for="temperature">temp</label><input form="chat-form" id="temperature" name="temperature" type="number" step=".1" min="0" max="2" value="{{ temperature }}" required>
+<button id="copy-chat" type="button" class="icon-btn text-icon-btn">Copy chat</button>
+<a href="/" class="icon-btn" aria-label="Clear conversation" title="Clear conversation">⌫</a></div>
+{% else %}
+<a class="icon-btn text-icon-btn" href="/">← Chat</a>
+<nav class="console-tabs">{% for slug,title in pages.items() %}<a class="console-tab {{ 'active' if page==slug }}" href="/{{ slug }}">{{ title }}</a>{% endfor %}</nav>
+<div class="chat-header-actions" style="margin-left:auto">{{ signout() }}</div>
+{% endif %}</header>
+{% if page=='chat' %}
+<div id="messages" class="messages">{% for m in messages %}<div class="msg-wrap {{ m.role }}"><div class="msg {{ m.role }}" style="white-space:pre-wrap">{{ m.content }}</div></div>{% endfor %}</div>
+<div id="composer-hint" class="composer-hint hint"></div><form method="post" id="chat-form" class="composer">{{ csrf() }}<textarea name="prompt" id="chat-input" rows="4" placeholder="Message the model…" aria-label="Message" required></textarea><div class="composer-btn-row"><div class="composer-tool-group" role="group" aria-label="Writing tools">
+<button type="button" id="insert-code-btn" class="composer-icon-btn" title="Insert code block">&lt;/&gt;</button>
+<button type="button" id="multiline-toggle" class="composer-icon-btn" aria-label="Toggle multi-line input" aria-pressed="false">A</button>
+</div><button id="send-btn">Send</button></div></form>
+{% else %}
+<div class="console-body"><div class="console-head"><h1>{{ 'Download Models' if page=='downloads' else pages[page] }}</h1></div>
+{% for notice in get_flashed_messages() %}<p role="alert">{{ notice }}</p>{% endfor %}
+<div class="console-grid">
+{% if page=='users' %}
+<div class="console-card"><h2>Add a user</h2><form method="post" class="download-form">{{ csrf() }}
+<input class="panel-input" name="username" placeholder="Username" required maxlength="80">
+<input class="panel-input" name="password" type="password" minlength="8" placeholder="Password (min 8 characters)" autocomplete="new-password" required>
+<select class="panel-input" name="role"><option value="user">User</option><option value="admin">Admin</option></select><button class="panel-btn">Add user</button></form></div>
+<div class="console-card"><h2>All users</h2>{% for u in accounts %}<div class="model-card"><strong>{{ u.username }}</strong> <span class="badge">{{ u.role }}</span>{% if u.username != g.user.username %}<form method="post">{{ csrf() }}<input type="hidden" name="action" value="access"><input type="hidden" name="username" value="{{ u.username }}"><button class="panel-btn">{{ 'Disable' if u.enabled else 'Enable' }} account</button></form>{% endif %}</div>{% endfor %}</div>
+{% endif %}
+{% if page in ('users','history') %}<section class="console-card span-all"><h2>Activity history</h2><table class="console-table"><tr><th>Time</th><th>User</th><th>Event</th></tr>{% for e in events %}<tr><td>{{ e.created }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td></tr>{% endfor %}</table></section>{% endif %}
+{% if page=='downloads' %}{% include 'downloads.html' %}{% endif %}
+{% if page=='models' %}<section class="console-card span-all"><h2>Local models</h2>
+<div class="model-toolbar"><input id="model-search" class="panel-input" type="search" placeholder="Filter models by name…" aria-label="Filter models by name"><button class="panel-btn" onclick="location.reload()">Refresh</button></div>
+<div id="model-groups" class="model-groups">{% for model in models %}<div class="model-card"><div class="model-card-top"><div><div class="model-name">{{ model }}</div><div class="model-meta">llama.cpp · GGUF</div></div><span class="badge loaded">Loaded</span></div></div>{% endfor %}</div><p id="model-empty" class="hint" hidden>No matching models.</p></section>
+<section class="console-card span-all"><h2>Downloaded files</h2>{% for path in downloaded %}<div class="model-card"><div class="model-name">{{ path.name }}</div><span class="model-meta">{{ path.parent }}</span></div>{% else %}<p class="hint">No downloads yet.</p>{% endfor %}</section><script src="/static/models.js"></script>{% endif %}
+{% if page=='settings' %}<section class="console-card"><h2>llama.cpp</h2><form method="post" class="download-form">{{ csrf() }}<label>Default chat temperature <input class="panel-input" name="temperature" type="number" min="0" max="2" step=".1" value="{{ temperature }}" required></label><button class="panel-btn">Save settings</button></form></section><section class="console-card"><h2>Service controls</h2><form method="post">{{ csrf() }}<input type="hidden" name="action" value="restart"><button class="panel-btn">Restart llama.cpp</button></form></section>{% endif %}
+{% if page in ('live-logs',) %}<section class="console-card span-all"><h2>llama.cpp</h2><pre class="download-log">{{ logs }}</pre></section>{% endif %}
+</div></div>{% endif %}</main></div>{% if page=='chat' %}{% include 'code_modal.html' %}<script src="/static/system_stats.js"></script><script src="/static/chat.js"></script><script src="/static/model_select_search.js"></script>{% endif %}</body></html>

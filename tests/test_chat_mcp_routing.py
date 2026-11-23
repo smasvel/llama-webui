@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import patch
 
-from hearth.backends import lemonade_client
-from hearth.backends import lmstudio_client
-from hearth.backends import kobold_client
+from llama_web.backends import lemonade_client
+from llama_web.backends import lmstudio_client
+from llama_web.backends import kobold_client
 
 
 class _Response:
@@ -45,7 +45,7 @@ class ChatMCPRoutingTests(unittest.TestCase):
             'http://127.0.0.1:13307/v1/chat/completions')
 
     def test_kobold_tool_chat_forwards_parallel_call_support(self):
-        with patch('hearth.backends.kobold_tool_shim.start_server', return_value='http://127.0.0.1:13308') as start:
+        with patch('llama_web.backends.kobold_tool_shim.start_server', return_value='http://127.0.0.1:13308') as start:
             self._assert_tool_route(kobold_client,
                 'http://127.0.0.1:13308/v1/chat/completions')
         start.assert_called_once_with()
@@ -53,7 +53,7 @@ class ChatMCPRoutingTests(unittest.TestCase):
 
 class ChatToolSelectionTests(unittest.TestCase):
     def test_research_evidence_omits_redundant_tools_but_keeps_explicit_actions(self):
-        from hearth.integrations.mcp_tools_client import select_chat_tools
+        from llama_web.integrations.mcp_tools_client import select_chat_tools
         tools = [{"function": {"name": name}} for name in (
             "playwright__browser_navigate", "playwright__browser_click",
             "python_repl__execute_python",
@@ -64,8 +64,8 @@ class ChatToolSelectionTests(unittest.TestCase):
         self.assertEqual(select_chat_tools(tools, "Run Python"), tools[2:])
 
     def test_current_wait_time_enables_browser_tools(self):
-        from hearth.integrations.mcp_tools_client import chat_tool_mode, select_chat_tools
-        from hearth.integrations import web_search_client
+        from llama_web.integrations.mcp_tools_client import chat_tool_mode, select_chat_tools
+        from llama_web.integrations import web_search_client
         tools = [{"function": {"name": "playwright__" + name}} for name in (
             "browser_navigate", "browser_snapshot", "browser_click",
         )]

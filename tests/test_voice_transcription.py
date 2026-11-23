@@ -28,7 +28,7 @@ class VoiceTranscriptionRouteTests(unittest.TestCase):
 
     def test_manual_and_hands_free_route_uses_lemonade_whisper(self):
         audio = io.BytesIO(b"sample audio")
-        with patch.object(app.lemonade, "transcribe_audio", return_value="hello hearth") as whisper, \
+        with patch.object(app.lemonade, "transcribe_audio", return_value="hello llama_web") as whisper, \
              patch.object(app.fastflowlm, "transcribe_audio", side_effect=AssertionError("wrong transcription backend")):
             response = self.client.post(
                 "/api/voice/transcribe",
@@ -36,7 +36,7 @@ class VoiceTranscriptionRouteTests(unittest.TestCase):
                 headers={"X-CSRF-Token": "voice-test-csrf"},
             )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json["text"], "hello hearth")
+        self.assertEqual(response.json["text"], "hello llama_web")
         whisper.assert_called_once_with(b"sample audio", filename="recording.webm")
 
     def test_transcription_errors_return_actionable_backend_error(self):

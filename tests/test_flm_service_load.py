@@ -1,4 +1,4 @@
-"""Set HEARTH_LIVE_FLM_MODEL to an installed flm/<tag> to exercise a real NPU handoff."""
+"""Set LLAMA_WEB_LIVE_FLM_MODEL to an installed flm/<tag> to exercise a real NPU handoff."""
 import os
 from pathlib import Path
 import runpy
@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from hearth.backends import flm_serve
+from llama_web.backends import flm_serve
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,7 +49,7 @@ class FastFlowLMServiceTests(unittest.TestCase):
         evict.assert_not_called()
         load.assert_not_called()
 
-    @unittest.skipUnless(os.environ.get('HEARTH_LIVE_FLM_MODEL'), 'requires an installed FLM model')
+    @unittest.skipUnless(os.environ.get('LLAMA_WEB_LIVE_FLM_MODEL'), 'requires an installed FLM model')
     def test_live_model_load_then_generate(self):
         # Bound the entire handoff, including a load route blocked on the NPU lock.
         subprocess.run([sys.executable, '-m', 'tests.test_flm_service_load'],
@@ -59,11 +59,11 @@ class FastFlowLMServiceTests(unittest.TestCase):
 def verify_live_load():
     import psutil
     import requests
-    from hearth.backends import flm_context
-    from hearth.backends import fastflowlm_client as flm
+    from llama_web.backends import flm_context
+    from llama_web.backends import fastflowlm_client as flm
     from tests._side_test_helpers import as_admin, csrf, patch_admin
 
-    model = os.environ['HEARTH_LIVE_FLM_MODEL']
+    model = os.environ['LLAMA_WEB_LIVE_FLM_MODEL']
     if not flm.owns_model(model):
         raise ValueError('Expected a standalone flm/<tag> model')
     with patch_admin():

@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>{{ 'Create administrator' if setup_mode else 'Sign in' }} — Hearth</title>
+  <title>{{ 'Create administrator' if setup_mode else 'Sign in' }} — llama-web</title>
   <link rel="stylesheet" href="{{ asset('style.css') }}&login=demo-dialog-v8" />
   <script src="{{ asset('login.js') }}&demo=1" defer></script>
 </head>
 <body class="login-body">
   <main class="login-shell login-shell-centered">
-    <section class="login-showcase" aria-label="Hearth AI workspace">
-      <a class="login-brand" href="/login" aria-label="Hearth home"><span class="login-brand-mark">H</span>hearth<span class="login-brand-dot">.</span></a>
+    <section class="login-showcase" aria-label="llama-web AI workspace">
+      <a class="login-brand" href="/login" aria-label="llama-web home"><span class="login-brand-mark">H</span>llama-web<span class="login-brand-dot">.</span></a>
       <div class="login-story">
         <div class="login-eyebrow"><span></span> YOUR PRIVATE AI WORKSPACE</div>
         <h1>Ideas in motion.<br /><em>Work in progress.</em></h1>
@@ -49,14 +49,14 @@
     </section>
     <section class="login-panel" aria-labelledby="login-heading">
       <div class="login-card">
-        <div class="login-mobile-brand"><span class="login-brand-mark">H</span>hearth<span class="login-brand-dot">.</span></div>
+        <div class="login-mobile-brand"><span class="login-brand-mark">H</span>llama-web<span class="login-brand-dot">.</span></div>
         <div class="login-panel-heading"><span class="login-panel-kicker">{% if setup_mode %}FIRST-TIME SETUP{% else %}WELCOME BACK{% endif %}</span>
           <h2 id="login-heading">{{ 'Create your space' if setup_mode else 'Good to see you.' }}</h2>
           <p>{{ 'Set up your administrator account to begin.' if setup_mode else 'Sign in to pick up where your agents left off.' }}</p>
         </div>
         <button class="login-demo-trigger" type="button" aria-haspopup="dialog" aria-controls="login-demo-dialog">
           <span class="login-demo-play" aria-hidden="true">▶</span>
-          <span class="login-demo-copy">Watch the 25-second demo<small>See Hearth in action · sound on</small></span>
+          <span class="login-demo-copy">Watch the 25-second demo<small>See llama-web in action · sound on</small></span>
           <span class="login-demo-arrow" aria-hidden="true">↗</span>
         </button>
         {% if error %}<p class="login-error" role="alert">{{ error }}</p>{% endif %}
@@ -80,22 +80,22 @@
             <button type="submit">Sign in securely <span aria-hidden="true">→</span></button>
           {% endif %}
         </form>
-        <div class="login-secure"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>Private workspace <span>·</span> Protected by Hearth</div>
+        <div class="login-secure"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>Private workspace <span>·</span> Protected by llama-web</div>
       </div>
-      <div class="login-panel-foot">A calmer way to work with AI <span>© HEARTH</span></div>
+      <div class="login-panel-foot">A calmer way to work with AI <span>© LLAMA-WEB</span></div>
     </section>
   </main>
   <dialog class="login-demo-dialog" id="login-demo-dialog" aria-labelledby="login-demo-title" aria-describedby="login-demo-description">
     <div class="login-demo-dialog-head">
-      <div><span>HEARTH · PRODUCT TOUR</span><h2 id="login-demo-title">Your private AI workspace</h2></div>
+      <div><span>LLAMA-WEB · PRODUCT TOUR</span><h2 id="login-demo-title">Your private AI workspace</h2></div>
       <button class="login-demo-close" type="button" aria-label="Close demo">×</button>
     </div>
-    <video id="login-demo-video" controls playsinline preload="none" poster="{{ url_for('hearth_feature_demo_poster') }}" aria-label="Hearth product feature demo with music and sound effects">
-      <source src="{{ url_for('hearth_feature_demo') }}" type="video/mp4" />
-      Your browser does not support embedded video. <a href="{{ url_for('hearth_feature_demo') }}">Open the Hearth demo video</a>.
+    <video id="login-demo-video" controls playsinline preload="none" poster="{{ url_for('llama_web_feature_demo_poster') }}" aria-label="llama-web product feature demo with music and sound effects">
+      <source src="{{ url_for('llama_web_feature_demo') }}" type="video/mp4" />
+      Your browser does not support embedded video. <a href="{{ url_for('llama_web_feature_demo') }}">Open the llama-web demo video</a>.
     </video>
     <p id="login-demo-description">Models, chat, project agents, evaluations, and creative tools — all in your private AI workspace.</p>
-    <p class="login-demo-error" id="login-demo-error" role="status" hidden>Playback did not start. Use the video controls or <a href="{{ url_for('hearth_feature_demo') }}" target="_blank" rel="noopener">open the video directly</a>.</p>
+    <p class="login-demo-error" id="login-demo-error" role="status" hidden>Playback did not start. Use the video controls or <a href="{{ url_for('llama_web_feature_demo') }}" target="_blank" rel="noopener">open the video directly</a>.</p>
   </dialog>
 </body>
 </html>

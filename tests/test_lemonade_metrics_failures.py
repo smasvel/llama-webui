@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 import requests
-from hearth.backends import lemonade_guard_shim as shim
+from llama_web.backends import lemonade_guard_shim as shim
 
 
 class Upstream:
@@ -40,7 +40,7 @@ class FailureMetricsTests(unittest.TestCase):
 
     def send(self):
         return self.client.post('/v1/chat/completions', json={'model': 'test-model', 'stream': True},
-                                headers={'X-Hearth-Client': 'opencode'})
+                                headers={'X-llama_web-Client': 'opencode'})
 
     def assert_metric(self, status):
         self.metric.assert_called_once()
@@ -55,14 +55,14 @@ class FailureMetricsTests(unittest.TestCase):
                 self.post.side_effect = error
                 response = self.send()
                 self.assertEqual(response.status_code, status)
-                self.assertEqual(response.headers['X-Hearth-Metrics-Recorded'], '1')
+                self.assertEqual(response.headers['X-llama_web-Metrics-Recorded'], '1')
                 self.assert_metric(status)
 
     def test_unload_failure_is_attributed(self):
         self.unload.side_effect = RuntimeError('busy')
         response = self.send()
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.headers['X-Hearth-Metrics-Recorded'], '1')
+        self.assertEqual(response.headers['X-llama_web-Metrics-Recorded'], '1')
         self.assert_metric(503)
         self.post.assert_not_called()
 

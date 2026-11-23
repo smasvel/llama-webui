@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from hearth.backends import fastflowlm_client as flm
+from llama_web.backends import fastflowlm_client as flm
 
 
 def _state_dir(tmp: str) -> "flm.Path":
@@ -12,9 +12,9 @@ def _state_dir(tmp: str) -> "flm.Path":
 
 
 class FastFlowLMSharedStateTests(unittest.TestCase):
-    """Both Hearth installs write the NPU paused/active state into the same host
-    directory. When Docker Hearth creates those files as root they must stay writable
-    by the host Hearth install, and vice versa."""
+    """Both llama_web installs write the NPU paused/active state into the same host
+    directory. When Docker llama_web creates those files as root they must stay writable
+    by the host llama_web install, and vice versa."""
 
     def _make_state(self, tmp: str):
         import os as os_mod
@@ -24,7 +24,7 @@ class FastFlowLMSharedStateTests(unittest.TestCase):
 
 
 class BrokerFlmPullTests(unittest.TestCase):
-    """Docker Hearth has no `flm` binary, so model downloads relay through the broker."""
+    """Docker llama_web has no `flm` binary, so model downloads relay through the broker."""
 
     def test_download_via_broker_relays_pull_progress(self):
         snapshots = [
@@ -48,7 +48,7 @@ class BrokerFlmPullTests(unittest.TestCase):
         returncode/stdout wrapper). `_broker_flm` must turn it back into JSON text so
         `_flm_pull_progress()` sees the same data the CLI path produces."""
         progress = {"running": True, "tag": "qwen3:0.6b", "percent": 40, "bytes_downloaded": 40, "bytes_total": 100}
-        src = importlib.import_module("hearth.backends.backend_broker_client")
+        src = importlib.import_module("llama_web.backends.backend_broker_client")
 
         class FakeResponse:
             status_code = 200

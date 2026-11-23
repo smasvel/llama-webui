@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <script src="{{ asset('csrf.js') }}"></script>
-  <title>Models — Hearth</title>
+  <title>Models — llama-web</title>
   <link rel="stylesheet" href="{{ asset('style.css') }}" />
 </head>
 <body class="models-page">
@@ -16,11 +16,9 @@
         <nav class="console-tabs">
           {% if agentic_workflow_enabled %}<a class="console-tab" href="{{ url_for('agents_page') }}">Agents</a>{% endif %}
           <a class="console-tab active" href="{{ url_for('models_page') }}">Models</a>
-          <a class="console-tab" href="{{ url_for('model_tests_page') }}">Model tests</a>
           <a class="console-tab" href="{{ url_for('downloads_page') }}">Downloads</a>
           <a class="console-tab" href="{{ url_for('flm_converter_page') }}">Converter</a>
           <a class="console-tab" href="{{ url_for('browse_history_page') }}">History</a>
-          <a class="console-tab" href="{{ url_for('metrics_page') }}">Metrics</a>
           <a class="console-tab" href="{{ url_for('live_logs_page') }}">Live logs</a>
           <a class="console-tab" href="{{ url_for('users_page') }}">Users</a>
           <a class="console-tab" href="{{ url_for('settings_page') }}">Settings</a>
@@ -55,7 +53,7 @@
 
         <section id="local-model-tools" class="console-card span-all" aria-labelledby="local-model-upload-heading">
           <h2 id="local-model-upload-heading">Upload a local GGUF model</h2>
-          <p class="hint">Browse for a GGUF file on this device. Hearth uploads it to local model storage and registers it with the configured Lemonade server. The file remains on this host so Lemonade can load it.</p>
+          <p class="hint">Browse for a GGUF file on this device. llama-web uploads it to local model storage and registers it with the configured Lemonade server. The file remains on this host so Lemonade can load it.</p>
           <form id="local-model-upload-form" class="download-form">
             <div class="download-row">
               <input id="local-model-file" class="panel-input" type="file" accept=".gguf,application/octet-stream" required />

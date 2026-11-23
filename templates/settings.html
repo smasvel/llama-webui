@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <script src="{{ asset('csrf.js') }}"></script>
-  <title>Settings — Hearth</title>
+  <title>Settings — llama-web</title>
   <link rel="stylesheet" href="{{ asset('style.css') }}" />
 </head>
 <body>
@@ -16,11 +16,9 @@
         <nav class="console-tabs">
           {% if agentic_workflow_enabled %}<a class="console-tab" href="{{ url_for('agents_page') }}">Agents</a>{% endif %}
           <a class="console-tab" href="{{ url_for('models_page') }}">Models</a>
-          <a class="console-tab" href="{{ url_for('model_tests_page') }}">Model tests</a>
           <a class="console-tab" href="{{ url_for('downloads_page') }}">Downloads</a>
           <a class="console-tab" href="{{ url_for('flm_converter_page') }}">Converter</a>
           <a class="console-tab" href="{{ url_for('browse_history_page') }}">History</a>
-          <a class="console-tab" href="{{ url_for('metrics_page') }}">Metrics</a>
           <a class="console-tab" href="{{ url_for('live_logs_page') }}">Live logs</a>
           <a class="console-tab" href="{{ url_for('users_page') }}">Users</a>
           <a class="console-tab active" href="{{ url_for('settings_page') }}">Settings</a>
@@ -66,7 +64,7 @@
             </label>
             <div class="download-row">
               <button id="restart-backends" class="panel-btn" type="button">Restart selected backends</button>
-              <button id="restart-hearth" class="panel-btn" type="button">Restart Hearth</button>
+              <button id="restart-llama-web" class="panel-btn" type="button">Restart llama-web</button>
             </div>
             <div id="restart-status" class="hint" aria-live="polite" style="margin-top: 8px;"></div>
             <div id="lemonade-sudo-status" class="hint" style="margin-top: 4px; font-weight: bold;"></div>
@@ -105,7 +103,7 @@
             </label>
             <p class="hint">
               This is the default for Lemonade models. A model-specific choice on the Models page
-              overrides it for Hearth chat. Applied per-request (Lemonade's own model-load API
+              overrides it for llama-web chat. Applied per-request (Lemonade's own model-load API
               silently ignores this setting, confirmed live); OpenCode uses this global default. Turning this off skips the model's
               reasoning phase but does <strong>not</strong> meaningfully speed up a response
               dominated by prompt-processing time on a large context — it only removes visibility
@@ -126,7 +124,7 @@
             <div class="download-row">
               <button id="restart-q38rocm" class="panel-btn" type="button">Restart q38rocm</button>
             </div>
-            <p class="hint">Hearth starts and stops the local q38rocm service from Models. Restart it here after a backend issue; an unloaded service stays unloaded. The default loaded context is 131,072 tokens; the model maximum is 262,144. Models shows the runtime's current window.</p>
+            <p class="hint">llama-web starts and stops the local q38rocm service from Models. Restart it here after a backend issue; an unloaded service stays unloaded. The default loaded context is 131,072 tokens; the model maximum is 262,144. Models shows the runtime's current window.</p>
           </div>
 
 
@@ -170,7 +168,7 @@
           <div class="console-card span-all">
             <h2>opencode.ai (remote hosted models)</h2>
             <p class="hint">
-              Connects Hearth to the opencode.ai hosted model catalog (GPT/Gemini/GLM and
+              Connects llama-web to the opencode.ai hosted model catalog (GPT/Gemini/GLM and
               more) through its OpenAI-compatible inference endpoint with your opencode.ai
               API key. Models are discovered automatically; download and deletion stay
               with the opencode.ai account. The key is stored encrypted in PostgreSQL and
@@ -286,7 +284,7 @@
           <div class="console-card span-all">
             <h2>Web search and research</h2>
             <p class="hint">
-              Controls when Hearth searches and opens result pages. Playwright opens relevant
+              Controls when llama-web searches and opens result pages. Playwright opens relevant
               organic pages, blocks ad and tracker requests, and does not click page controls.
               Higher page limits support broad research while relevance and domain diversity
               keep fetched pages focused. Disabling browser access still permits snippets.
@@ -354,7 +352,7 @@
           <div class="console-card span-all">
             <h2>Chat request limits</h2>
             <p class="hint">
-              Ceilings the app enforces on Hearth's own chat requests. A request that doesn't ask
+              Ceilings the app enforces on llama-web's own chat requests. A request that doesn't ask
               for a specific <code class="inline-code">max_tokens</code> uses <strong>Default max
               tokens</strong>, which ships set to the cap. Clear a field to restore its built-in
               default. These do not affect OpenCode/Continue, which talk to the backends directly.
@@ -390,7 +388,7 @@
                        min="1" max="100" step="1" value="100" />
               </label>
             </div>
-            <p class="hint">Higher values allow longer multi-step tool use. This applies to Hearth chat and does not change OpenCode/Continue.</p>
+            <p class="hint">Higher values allow longer multi-step tool use. This applies to llama-web chat and does not change OpenCode/Continue.</p>
           </div>
 
           <div class="console-card span-all">

@@ -76,7 +76,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_large_code_allows_slow_cpu_prefill(self):
         response = Mock()
-        response.json.return_value = {'choices': [{'message': {'content': 'HEARTH_CONTEXT_OK_5829'}, 'finish_reason': 'stop'}]}
+        response.json.return_value = {'choices': [{'message': {'content': 'LLAMA_WEB_CONTEXT_OK_5829'}, 'finish_reason': 'stop'}]}
         with patch('tools.test_flm_model.requests.post', return_value=response) as post:
             results = run_suite('fixture', 'http://local', suite='core', only={('large-code-input', False)})
         self.assertTrue(results[0]['passed'])

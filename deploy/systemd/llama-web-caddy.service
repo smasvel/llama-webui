@@ -1,0 +1,14 @@
+[Unit]
+Description=llama-web Caddy gateway
+Wants=llama-web.service
+After=llama-web.service
+
+[Service]
+Environment=XDG_CONFIG_HOME=%h/.config/llama-web/caddy
+Environment=XDG_DATA_HOME=%h/.local/share/llama-web/caddy
+ExecStart=/usr/bin/caddy run --config %h/.local/share/llama-web/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

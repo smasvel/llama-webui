@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from hearth.core import help_data
+from llama_web.core import help_data
 
 BE, MODEL = 'lemonade', 'Muse-Glimmer-30B-GGUF'
 

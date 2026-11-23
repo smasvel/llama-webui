@@ -1,11 +1,11 @@
-from hearth.storage import database
+from llama_web.storage import database
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hearth.storage import memory_store
-from hearth.storage import chat_store
+from llama_web.storage import memory_store
+from llama_web.storage import chat_store
 
 
 class MemoryStoreTests(unittest.TestCase):

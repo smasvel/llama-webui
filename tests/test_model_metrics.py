@@ -1,11 +1,11 @@
-from hearth.storage import database
+from llama_web.storage import database
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hearth.storage import metrics_store
+from llama_web.storage import metrics_store
 
 
 class ModelReportTests(unittest.TestCase):

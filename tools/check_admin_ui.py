@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app
-from hearth.storage import database
+from llama_web.storage import database
 from playwright.sync_api import expect, sync_playwright
 from werkzeug.serving import make_server
 
@@ -77,6 +77,6 @@ with contextlib.ExitStack() as stack:
             response = context.request.get(f'http://127.0.0.1:{server.server_port}{route}')
             assert response.status == 200, f'{route} returned {response.status}'
         assert not errors, errors
-        page.screenshot(path='/tmp/hearth-admin-ui.png', full_page=True)
+        page.screenshot(path='/tmp/llama_web-admin-ui.png', full_page=True)
         browser.close()
         print('PASS browser Settings persistence and secret encryption, user creation, credential isolation, and workflow controls, and admin route access')

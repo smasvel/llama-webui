@@ -44,7 +44,7 @@ class ReleaseInstallerAutomationTests(unittest.TestCase):
         from tools import release_installer
         args = ['--backend=lmstudio', '--backend-url=http://remote:1234',
                 '--skip-backend-install', '--skip-browser', '--no-api-key']
-        with patch.dict(os.environ, {'HEARTH_RELEASE_INSTALL_IN_VENV': '0'}), \
+        with patch.dict(os.environ, {'LLAMA_WEB_RELEASE_INSTALL_IN_VENV': '0'}), \
              patch.object(release_installer.platform, 'system', return_value='Linux'), \
              patch.object(release_installer.shutil, 'which', return_value='/usr/bin/docker'), \
              patch.object(release_installer, '_run'), \
@@ -61,7 +61,7 @@ class ReleaseInstallerAutomationTests(unittest.TestCase):
     def test_linux_browser_install_includes_system_dependencies(self):
         import os
         from tools import release_installer
-        with patch.dict(os.environ, {'HEARTH_RELEASE_INSTALL_IN_VENV': '0'}), \
+        with patch.dict(os.environ, {'LLAMA_WEB_RELEASE_INSTALL_IN_VENV': '0'}), \
              patch.object(release_installer.platform, 'system', return_value='Linux'), \
              patch.object(release_installer.shutil, 'which', return_value='/usr/bin/docker'), \
              patch.object(release_installer, '_run') as run, \
@@ -75,7 +75,7 @@ class ReleaseInstallerAutomationTests(unittest.TestCase):
     def test_legacy_data_blocks_runtime_and_agent_installation(self):
         import os
         from tools import release_installer, first_time_setup, backend_installer
-        with patch.dict(os.environ, {'HEARTH_RELEASE_INSTALL_IN_VENV': '1'}), \
+        with patch.dict(os.environ, {'LLAMA_WEB_RELEASE_INSTALL_IN_VENV': '1'}), \
              patch.object(release_installer.platform, 'system', return_value='Linux'), \
              patch.object(release_installer.shutil, 'which', return_value='/usr/bin/docker'), \
              patch.object(release_installer, '_run'), \

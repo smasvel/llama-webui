@@ -805,7 +805,7 @@
   // meant for someone new to this specific browser's Hearth session, not a one-time global flag.
   const gettingStartedBanner = document.getElementById("getting-started-banner");
   const gettingStartedDismiss = document.getElementById("getting-started-dismiss");
-  const GETTING_STARTED_KEY = "hearth-downloads-getting-started-dismissed";
+  const GETTING_STARTED_KEY = "llama-web-downloads-getting-started-dismissed";
   if (gettingStartedBanner && !localStorage.getItem(GETTING_STARTED_KEY)) {
     gettingStartedBanner.classList.remove("hidden");
   }

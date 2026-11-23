@@ -89,7 +89,7 @@ def install_backends(backends):
                 suffix = '.ps1' if system == 'Windows' else '.sh'
                 url = 'https://lmstudio.ai/install' + suffix
                 print(f'Installing LM Studio headless runtime from {url}')
-                with tempfile.TemporaryDirectory(prefix='hearth-runtime-') as directory:
+                with tempfile.TemporaryDirectory(prefix='llama_web-runtime-') as directory:
                     script = Path(directory) / ('install' + suffix)
                     if system != "Windows":
                         subprocess.run(["curl", "--fail", "--show-error", "--location",

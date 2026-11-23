@@ -2,8 +2,8 @@
 import unittest
 from unittest.mock import patch
 
-from hearth.backends import flm_tool_shim, lemonade_guard_shim
-from hearth.core import live_requests
+from llama_web.backends import flm_tool_shim, lemonade_guard_shim
+from llama_web.core import live_requests
 
 
 class FLMLiveLogTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class FLMLiveLogTests(unittest.TestCase):
         lock.acquire.side_effect = lambda: waiting.extend(live_requests.snapshot())
         response = shim.app.test_client().post('/v1/chat/completions', json={
             'model': model, 'messages': [{'role': 'user', 'content': 'Hello'}],
-        }, headers={'X-Hearth-Client': 'opencode'})
+        }, headers={'X-llama_web-Client': 'opencode'})
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(len(waiting), 1, 'Expected one visible row before acquiring the NPU')

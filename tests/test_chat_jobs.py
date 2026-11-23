@@ -1,4 +1,4 @@
-from hearth.storage import database
+from llama_web.storage import database
 import contextlib
 import io
 import json
@@ -11,9 +11,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
-from hearth.core import chat_jobs
-from hearth.storage import chat_store
-from hearth.storage import settings_store
+from llama_web.core import chat_jobs
+from llama_web.storage import chat_store
+from llama_web.storage import settings_store
 
 
 class BackgroundChatTests(unittest.TestCase):

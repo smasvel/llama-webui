@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from hearth.agents.agent_tasks import Manager, MARKER, FIRST_TOKEN_TIMEOUT, PROGRESS_TIMEOUT, HANDOFF_TIMEOUT
+from llama_web.agents.agent_tasks import Manager, MARKER, FIRST_TOKEN_TIMEOUT, PROGRESS_TIMEOUT, HANDOFF_TIMEOUT
 import app
 
 MODEL = {'providerID': 'fastflowlm', 'id': 'flm/qwen3-it:4b'}
@@ -28,13 +28,13 @@ class AgentTaskTests(unittest.TestCase):
         self.client.snapshot.side_effect = lambda _: copy.deepcopy(self.snap)
         self.owner = app.users_store.create_user('agent-test-' + uuid.uuid4().hex, 'test-password', 'admin')['id']
         self.addCleanup(app.users_store.delete_user, self.owner)
-        from hearth.agents import agent_store
+        from llama_web.agents import agent_store
         list_tasks = agent_store.list_tasks
         self.stack=__import__('contextlib').ExitStack()
-        self.stack.enter_context(patch('hearth.agents.agent_store.list_tasks', side_effect=lambda: [
+        self.stack.enter_context(patch('llama_web.agents.agent_store.list_tasks', side_effect=lambda: [
             job for job in list_tasks() if job.get('owner') == self.owner]))
         self.manager = Manager(Path(self.tmp.name)/'tasks',self.client)
-        self.stack.enter_context(patch('hearth.agents.agent_tasks.Path.home', return_value=Path(self.tmp.name)))
+        self.stack.enter_context(patch('llama_web.agents.agent_tasks.Path.home', return_value=Path(self.tmp.name)))
         self.addCleanup(self.stack.close)
         self.values = {'title':'Build project','goal':'Build and verify the feature',
                        'model':MODEL,'assignee':'Test agent'}
@@ -59,7 +59,7 @@ class AgentTaskTests(unittest.TestCase):
         self.assertEqual(self.manager.get(key)['status'],'running')
 
     def test_agent_project_memory_only_searches_the_assignment_owners_notes(self):
-        from hearth.agents import agent_store
+        from llama_web.agents import agent_store
 
         other = self.create_other_account()
         own_task = self.manager.create(self.values, self.owner)
@@ -75,7 +75,7 @@ class AgentTaskTests(unittest.TestCase):
         self.assertNotIn('orbit own note', other_context)
 
     def test_shared_recipient_cannot_read_or_relink_owners_chat(self):
-        from hearth.agents import agent_store
+        from llama_web.agents import agent_store
 
         recipient = self.create_other_account()
         owner_chat, recipient_chat = uuid.uuid4().hex, uuid.uuid4().hex
@@ -124,7 +124,7 @@ class AgentTaskTests(unittest.TestCase):
             self.assertTrue(saved[0]['enabled'])
 
     def test_workspace_lookup_is_scoped_to_the_account_even_with_known_workspace_id(self):
-        from hearth.agents import agent_store
+        from llama_web.agents import agent_store
 
         other = self.create_other_account()
         workspace = self.manager.create(self.values, self.owner)['id']
@@ -356,7 +356,7 @@ class AgentTaskTests(unittest.TestCase):
                 'content': [{'type': 'text', 'text': 'Found https://example.org/result'}],
             }}],
         }]
-        with patch('hearth.agents.agent_tasks.browse_history_store.add_visit_once') as add_visit:
+        with patch('llama_web.agents.agent_tasks.browse_history_store.add_visit_once') as add_visit:
             self.manager.tick()
 
         add_visit.assert_called_once_with(
@@ -368,7 +368,7 @@ class AgentTaskTests(unittest.TestCase):
     def test_active_model_token_progress_is_reported_in_activity(self):
         key = self.create()
         job = self.manager.jobs[key]
-        with patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[{
+        with patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[{
             'id': 42, 'source': job['assignee'], 'status': 'streaming', 'tokens': 537,
         }]):
             self.manager._record_live_progress(job, {'messages': []})
@@ -380,7 +380,7 @@ class AgentTaskTests(unittest.TestCase):
         job = self.manager.jobs[key]
         job['awaiting_since'] = time.time() - 120
         ended = time.time() - 95
-        with patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[{
+        with patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[{
             'task_id': key[:24], 'status': 'done', 'finished_at': ended,
         }]):
             self.assertFalse(self.manager._record_live_progress(job, {'messages': []}))
@@ -392,7 +392,7 @@ class AgentTaskTests(unittest.TestCase):
         job['agent_last_progress_at'] = time.time() - PROGRESS_TIMEOUT - 1
         snap = {'messages': [{'type': 'assistant', 'content': [
             {'type': 'tool', 'state': {'status': 'pending'}}]}]}
-        with patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[]):
+        with patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[]):
             self.assertFalse(self.manager._record_live_progress(job, snap))
         self.assertIsNotNone(job['agent_no_request_since'])
 
@@ -402,7 +402,7 @@ class AgentTaskTests(unittest.TestCase):
         job.update(awaiting_since=time.time() - 1900,
                    agent_last_progress_at=time.time() - 5)
         self.snap['active'] = True
-        with patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[{
+        with patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[{
             'id': 43, 'source': job['assignee'], 'status': 'streaming', 'tokens': 800,
         }]):
             self.manager.tick()
@@ -416,7 +416,7 @@ class AgentTaskTests(unittest.TestCase):
         job.update(awaiting_since=time.time() - 1900,
                    agent_last_progress_at=time.time() - 1900)
         self.snap['active'] = True
-        with patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[]):
+        with patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[]):
             self.manager.tick()
 
         current = self.manager.get(key)
@@ -587,7 +587,7 @@ class AgentTaskTests(unittest.TestCase):
         self.manager.client = MissingContainerClient()
         key = self.manager.create(self.values, self.owner)['id']
         job = self.manager.jobs[key]
-        job.update(status='queued', session_id='hearth-agent-fixture::ses_fixture',
+        job.update(status='queued', session_id='llama_web-agent-fixture::ses_fixture',
                    resume_session=True, model_prepared=True, after_interrupt='blocked', errors=3)
         self.manager.save(job)
         self.manager.tick()
@@ -702,7 +702,7 @@ class AgentTaskTests(unittest.TestCase):
                           lambda client, task: events.append(('checkpoint', task['session_id'])), create=True), \
              patch.object(type(self.client), 'park',
                           lambda client, task: events.append(('park', task['session_id'])), create=True), \
-             patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[]):
+             patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[]):
             self.manager.tick()
         self.assertEqual(events, [(step, 'ses_fixture') for step in ('interrupt', 'checkpoint', 'park')])
         current = self.manager.get(key)
@@ -718,7 +718,7 @@ class AgentTaskTests(unittest.TestCase):
                    agent_last_progress_at=time.time()-FIRST_TOKEN_TIMEOUT-1,
                    agent_no_request_since=time.time()-HANDOFF_TIMEOUT-1)
         self.snap['messages'] = [{'id': 'partial', 'type': 'assistant', 'content': []}]
-        with patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[{
+        with patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[{
             'id': 10, 'task_id': key[:24], 'source': job['assignee'],
             'status': 'streaming', 'tokens': 1,
         }]):
@@ -733,7 +733,7 @@ class AgentTaskTests(unittest.TestCase):
         job.update(awaiting_since=time.time()-FIRST_TOKEN_TIMEOUT-1,
                    agent_last_progress_at=time.time()-PROGRESS_TIMEOUT-1)
         self.snap['active'] = True
-        with patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[{
+        with patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[{
             'id': 11, 'source': job['assignee'], 'task_id': key[:24],
             'status': 'streaming', 'tokens': 20,
         }]):
@@ -745,7 +745,7 @@ class AgentTaskTests(unittest.TestCase):
         key = self.create()
         job = self.manager.jobs[key]
         job['agent_no_request_since'] = time.time()-HANDOFF_TIMEOUT-1
-        with patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[{
+        with patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[{
             'id': 12, 'source': job['assignee'], 'task_id': 'other-task',
             'status': 'streaming', 'tokens': 100,
         }]):
@@ -757,7 +757,7 @@ class AgentTaskTests(unittest.TestCase):
         for attempt in range(3):
             job = self.manager.jobs[key]
             job['agent_no_request_since'] = time.time()-HANDOFF_TIMEOUT-1
-            with patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[]):
+            with patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[]):
                 self.manager.tick()
             if attempt < 2:
                 self.assertEqual(self.manager.get(key)['status'], 'running')
@@ -803,7 +803,7 @@ class AgentTaskTests(unittest.TestCase):
         with patch.object(type(self.client), 'checkpoint',
                           side_effect=RuntimeError('checkpoint unavailable'), create=True), \
              patch.object(type(self.client), 'park', create=True) as park, \
-             patch('hearth.agents.agent_tasks.live_requests.snapshot', return_value=[]):
+             patch('llama_web.agents.agent_tasks.live_requests.snapshot', return_value=[]):
             self.manager.tick()
         self.assertEqual(self.manager.get(key)['session_id'], 'ses_fixture')
         self.assertIn('checkpoint unavailable', self.manager.get(key)['error'])
@@ -924,7 +924,7 @@ class AgentTaskTests(unittest.TestCase):
 
     def test_completed_project_download_is_an_archive_of_project_files(self):
         key=self.create()
-        from hearth.agents import agent_store
+        from llama_web.agents import agent_store
         agent_store.save_workspace_file(self.owner,'result.txt',b'completed output')
         self.manager.jobs[key]['status']='completed'
         stream,name=self.manager.download(key)

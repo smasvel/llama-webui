@@ -3,10 +3,10 @@ import json
 import unittest
 from unittest.mock import patch
 
-from hearth.backends import flm_context as context
-from hearth.backends import flm_tool_shim as shim
-from hearth.core import help_data
-from hearth.backends import flm_serve
+from llama_web.backends import flm_context as context
+from llama_web.backends import flm_tool_shim as shim
+from llama_web.core import help_data
+from llama_web.backends import flm_serve
 
 
 class ContextTests(unittest.TestCase):

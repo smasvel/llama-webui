@@ -1,4 +1,4 @@
-"""Run Hearth model tests sequentially: load, test, unload."""
+"""Run llama_web model tests sequentially: load, test, unload."""
 
 import sys
 import time

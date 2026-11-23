@@ -1,4 +1,4 @@
-"""Kick the Muse model test through Hearth's own API so Live logs show it."""
+"""Kick the Muse model test through llama_web's own API so Live logs show it."""
 import sys
 import time
 from pathlib import Path
@@ -11,7 +11,7 @@ from _side_test_helpers import as_admin, csrf, report  # noqa: E402
 
 
 MODEL = {"backend": "lemonade", "id": "Muse-Glimmer-30B-GGUF"}
-print("== Hearth model test ==")
+print("== llama_web model test ==")
 client = as_admin()
 started = client.post("/api/model-tests", json={"models": [MODEL], "auto_repair": False, "suite": "all"}, headers=csrf())
 report("start", started.status_code)

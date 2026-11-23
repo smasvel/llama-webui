@@ -40,7 +40,7 @@ def main():
     target = Path(sys.argv[1]).resolve()
     options = set(sys.argv[2:])
     target.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(prefix='hearth-project-', suffix='.zip',
+    with tempfile.NamedTemporaryFile(prefix='llama_web-project-', suffix='.zip',
                                      dir=target.parent, delete=False) as tmp:
         archive_path = Path(tmp.name)
         total = 0

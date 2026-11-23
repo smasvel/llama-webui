@@ -1,8 +1,8 @@
-"""Small host-side broker for the Docker Hearth app to manage host systemd units.
+"""Small host-side broker for the Docker llama_web app to manage host systemd units.
 
-Docker Hearth runs the Flask app without systemd, so the vLLM / KoboldCPP / FastFlowLM
+Docker llama_web runs the Flask app without systemd, so the vLLM / KoboldCPP / FastFlowLM
 load/unload controls were unavailable from inside the container. This broker listens on
-127.0.0.1 and executes a *restricted* set of ``systemctl --user`` commands on the Hearth
+127.0.0.1 and executes a *restricted* set of ``systemctl --user`` commands on the llama_web
 host, returning ``(returncode, stdout, stderr)``.
 
 Defaults are about as locked down as this can be made short of not running at all:
@@ -13,7 +13,7 @@ Defaults are about as locked down as this can be made short of not running at al
 - an explicit allowlist of systemctl verbs — no ``kill``, no ``edit``, no ``run``,
   no ``daemon-reload`` and nothing else.
 
-Run it with ``python3 deploy/backend_broker.py`` from the Hearth host, or install it as
+Run it with ``python3 deploy/backend_broker.py`` from the llama_web host, or install it as
 a systemd *user* unit with ``bash deploy/install-backend-broker.sh``.
 """
 from __future__ import annotations
@@ -27,22 +27,22 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-DEFAULT_PORT = int(os.environ.get("HEARTH_BACKEND_BROKER_PORT", "8765"))
+DEFAULT_PORT = int(os.environ.get("LLAMA_WEB_BACKEND_BROKER_PORT", "8765"))
 DEFAULT_TOKEN_FILE = os.path.expanduser(
-    os.environ.get("HEARTH_BACKEND_BROKER_TOKEN_FILE", "~/.config/hearth/backend-broker/token")
+    os.environ.get("LLAMA_WEB_BACKEND_BROKER_TOKEN_FILE", "~/.config/llama_web/backend-broker/token")
 )
-# Docker Hearth drives these three host units. Keeping the list explicit makes the blast
+# Docker llama_web drives these three host units. Keeping the list explicit makes the blast
 # radius of a leaked token very small. FastFlowLM is a *system* unit (NPU memlock); vLLM
 # and KoboldCPP are user units, and the broker preserves that scope distinction.
 _DEFAULT_SERVICES = "vllm.service,kobold.service,q38rocm.service,flm.service"
 _ALLOWED_VERBS = frozenset({"start", "stop", "restart", "daemon-reload", "is-active", "is-enabled"})
 _ALLOWED_SCOPES = frozenset({"user", "system"})
-# The FLM CLI is only used from Docker Hearth to keep model *inventory*, download and
-# delete in sync with the host backend; fade in every actual `flm` verb Hearth needs.
+# The FLM CLI is only used from Docker llama_web to keep model *inventory*, download and
+# delete in sync with the host backend; fade in every actual `flm` verb llama_web needs.
 _FLM_ACTIONS = frozenset({"list", "pull", "remove", "--version", "pull-progress"})
 _ALLOWED_UNITS = frozenset(
     service.strip() for service in os.environ.get(
-        "HEARTH_BACKEND_BROKER_SERVICES", _DEFAULT_SERVICES
+        "LLAMA_WEB_BACKEND_BROKER_SERVICES", _DEFAULT_SERVICES
     ).split(",") if service.strip()
 )
 
@@ -58,15 +58,15 @@ class BrokerError(RuntimeError):
 def load_token(token_file: str = DEFAULT_TOKEN_FILE) -> str | None:
     """Read the broker bearer token.
 
-    Environment ``HEARTH_BACKEND_BROKER_TOKEN`` wins over the file. A file that is not
+    Environment ``LLAMA_WEB_BACKEND_BROKER_TOKEN`` wins over the file. A file that is not
     mode 600 is refused, so an accidental world-readable token cannot silently weaken
     the broker."""
-    env_token = os.environ.get("HEARTH_BACKEND_BROKER_TOKEN")
+    env_token = os.environ.get("LLAMA_WEB_BACKEND_BROKER_TOKEN")
     if env_token:
         return env_token
     try:
         if os.stat(token_file).st_mode & 0o077:
-            print(f"hearth-backend-broker: {token_file} must not be group/world-accessible", file=sys.stderr)
+            print(f"llama_web-backend-broker: {token_file} must not be group/world-accessible", file=sys.stderr)
             return None
         return open(token_file).read().strip() or None
     except OSError:
@@ -74,7 +74,7 @@ def load_token(token_file: str = DEFAULT_TOKEN_FILE) -> str | None:
 
 
 def run_systemctl(args: list[str], service: str, scope: str = "user", timeout: int = 120) -> tuple[int, str, str]:
-    """Run ``systemctl [--user] <args...> <service>`` on the Hearth host.
+    """Run ``systemctl [--user] <args...> <service>`` on the llama_web host.
 
     Returns ``(returncode, stdout, stderr)``. Verbs, scope and service names are validated
     so a leaked token still cannot run arbitrary commands."""
@@ -100,10 +100,10 @@ def run_systemctl(args: list[str], service: str, scope: str = "user", timeout: i
 
 _FLM_STATE = threading.Lock()
 
-_FLM_BIN = os.environ.get("HEARTH_BACKEND_BROKER_FLM_BIN", "/opt/fastflowlm/bin/flm")
-_FLM_LIB_DIR = os.environ.get("HEARTH_BACKEND_BROKER_FLM_LIB", "/opt/fastflowlm/lib")
+_FLM_BIN = os.environ.get("LLAMA_WEB_BACKEND_BROKER_FLM_BIN", "/opt/fastflowlm/bin/flm")
+_FLM_LIB_DIR = os.environ.get("LLAMA_WEB_BACKEND_BROKER_FLM_LIB", "/opt/fastflowlm/lib")
 _FLM_MODEL_ROOT = os.path.expanduser(os.environ.get(
-    "HEARTH_BACKEND_BROKER_FLM_MODEL_ROOT", "~/.config/flm/models"
+    "LLAMA_WEB_BACKEND_BROKER_FLM_MODEL_ROOT", "~/.config/flm/models"
 ))
 
 # The broker keeps one concurrent "flm pull" so a leaked token cannot queue up disk fills;
@@ -153,7 +153,7 @@ def _flm_environment() -> dict | None:
 
 
 def run_flm(args: list[str], timeout: int = 900, background: bool = False) -> dict:
-    """Run the FLM CLI on the Hearth host for the verbs Hearth uses from Docker."""
+    """Run the FLM CLI on the llama_web host for the verbs llama_web uses from Docker."""
     if not _flm_environment():
         raise BrokerError("FastFlowLM binary was not found on the broker host")
     verb = args[0] if args else ""
@@ -294,7 +294,7 @@ def _flm_catalog() -> dict:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    server_version = "hearth-backend-broker/1"
+    server_version = "llama_web-backend-broker/1"
     # Quiet down request logging; the token must never be logged.
     def log_message(self, fmt, *args) -> None:
         if "Bearer" in fmt % args:
@@ -366,7 +366,7 @@ class _Handler(BaseHTTPRequestHandler):
 def broker_main() -> None:
     port = DEFAULT_PORT
     httpd = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
-    print(f"hearth-backend-broker: listening on 127.0.0.1:{port} services={','.join(_allowed_units())}")
+    print(f"llama_web-backend-broker: listening on 127.0.0.1:{port} services={','.join(_allowed_units())}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -6,7 +6,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-from hearth.core import local_tls
+from llama_web.core import local_tls
 
 
 class LocalTLS(unittest.TestCase):

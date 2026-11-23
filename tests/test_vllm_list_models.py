@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from hearth.backends import vllm_client as vllm
+from llama_web.backends import vllm_client as vllm
 
 
 class VLLMListModelsTests(unittest.TestCase):

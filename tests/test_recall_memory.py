@@ -6,14 +6,14 @@ chunk, and the soft recall framing let weak models answer "You didn't tell me yo
 name!" even with the fact injected. The name fact must now be recalled even when
 the embedding search itself is unavailable.
 """
-from hearth.storage import database
+from llama_web.storage import database
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hearth.storage import memory_store
+from llama_web.storage import memory_store
 import app
 
 
@@ -136,9 +136,9 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
     """
 
     def setUp(self):
-        from hearth.storage import chat_store
-        from hearth.storage import settings_store
-        from hearth.core import chat_jobs
+        from llama_web.storage import chat_store
+        from llama_web.storage import settings_store
+        from llama_web.core import chat_jobs
         import contextlib
         import time
         self.stack = contextlib.ExitStack()
@@ -179,7 +179,7 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
                            last_activity=time.time(), login_csrf_token="test-csrf")
 
     def test_note_is_injected_into_latest_user_message_not_system(self):
-        from hearth.storage import chat_store
+        from llama_web.storage import chat_store
         body = {"model": "test-model", "conversation_id": "conv",
                 "messages": [{"role": "user", "content": "what's my name?"}], "max_tokens": 32}
         response = self.client.post("/api/chat", json=body, headers={"X-CSRF-Token": "test-csrf"})
@@ -190,7 +190,7 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
         response.close()
 
         sent = self.captured["messages"]
-        self.assertIn("Hearth cross-chat memory", sent[-1]["content"])
+        self.assertIn("llama_web cross-chat memory", sent[-1]["content"])
         self.assertIn("Maya Patel", sent[-1]["content"])
         self.assertTrue(sent[-1]["content"].endswith("what's my name?"))
         # The system channel must not carry the note (weak models ignore it there).
@@ -202,7 +202,7 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
 
 
     def test_chat_sends_updated_fact_first_without_copying_it_to_history(self):
-        from hearth.storage import chat_store
+        from llama_web.storage import chat_store
 
         old = "Project Atlas uses the blue staging cluster."
         new = "Project Atlas uses the green staging cluster."
@@ -238,7 +238,7 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
         self.assertEqual(saved[0]["content"], ask)
 
     def test_history_match_reaches_chat_when_vector_index_returns_only_a_stale_fact(self):
-        from hearth.storage import chat_store
+        from llama_web.storage import chat_store
 
         old = "Project Juniper's codeword is violet compass."
         fresh = "Project Juniper's codeword is silver lantern."
@@ -267,7 +267,7 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
         self.assertEqual(chat_store.get_conversation("lookup-chat", "u")["messages"][0]["content"], ask)
 
     def test_profile_questions_use_old_saved_chats_without_model_or_embeddings(self):
-        from hearth.storage import chat_store
+        from llama_web.storage import chat_store
 
         chat_store.ensure_conversation("old", "u", None, None)
         chat_store.add_message("old", "user", "My name is Maya Patel and I live in Madison, Wisconsin.")
@@ -300,7 +300,7 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
             model.assert_not_called()
 
     def test_weather_lookup_finishes_without_recall_or_model_even_when_provider_fails(self):
-        from hearth.storage import chat_store
+        from llama_web.storage import chat_store
 
         chat_store.ensure_conversation("saved-place", "u", None, None)
         chat_store.add_message("saved-place", "user", "My city and state are Boston, Massachusetts.")
@@ -328,7 +328,7 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
                 model.assert_not_called()
 
     def test_playwright_followup_uses_sources_even_if_model_denies_access(self):
-        from hearth.storage import chat_store
+        from llama_web.storage import chat_store
 
         topic = "Find the launch date of the James Webb Space Telescope"
         followup = "Search online using Playwright"
@@ -393,8 +393,8 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
 
     def test_background_chat_recalls_only_signed_in_users_memory_when_embeddings_are_offline(self):
         import time
-        from hearth.core import chat_jobs
-        from hearth.storage import chat_store
+        from llama_web.core import chat_jobs
+        from llama_web.storage import chat_store
 
         fact = "Project Juniper uses the silver lantern codeword."
         decoy = "Project Juniper uses the orange bicycle codeword."
@@ -429,7 +429,7 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
                                  question)
 
     def test_explicit_memory_lookup_and_reasoning_only_reply_show_saved_evidence(self):
-        from hearth.storage import chat_store
+        from llama_web.storage import chat_store
 
         fact = "Project Juniper uses the silver lantern codeword."
         chat_store.ensure_conversation("old-lookup", "u", None, fact)

@@ -8,9 +8,9 @@ import zipfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from hearth.agents import agent_store
-from hearth.storage import database
-from hearth.storage import users_store
+from llama_web.agents import agent_store
+from llama_web.storage import database
+from llama_web.storage import users_store
 
 
 def temporary_schema(test):
@@ -109,10 +109,10 @@ class AssignmentSkillTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.client = Mock()
         self.client.models.return_value = [{'providerID': 'lmstudio', 'id': 'qwen', 'name': 'Qwen'}]
-        from hearth.agents import agent_tasks
+        from llama_web.agents import agent_tasks
         from contextlib import ExitStack
         self.stack = ExitStack()
-        self.stack.enter_context(patch('hearth.agents.agent_tasks.Path.home', return_value=Path(self.tmp.name)))
+        self.stack.enter_context(patch('llama_web.agents.agent_tasks.Path.home', return_value=Path(self.tmp.name)))
         self.manager = agent_tasks.Manager(Path(self.tmp.name) / 'tasks', self.client)
         self.addCleanup(self.stack.close)
         self.values = {'title': 'Build it', 'goal': 'Build the feature',
@@ -163,7 +163,7 @@ class ContainerSkillTests(unittest.TestCase):
         self.owner = make_owner()
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        from hearth.agents import agent_container
+        from llama_web.agents import agent_container
         self.agent_container = agent_container
         self.container = agent_container.ContainerOpenCode(Path(self.tmp.name) / 'runtime')
         self.container._docker = Mock()
@@ -192,7 +192,7 @@ class ContainerSkillTests(unittest.TestCase):
     def test_agent_config_mentions_selected_skills(self):
         config = self.container._agent_config({}, 'lmstudio', 'qwen',
                                               {'options': {}, 'models': {'qwen': {}}}, skills=['Deploy Helper'])
-        system = config['agents']['hearth-worker']['system']
+        system = config['agents']['llama_web-worker']['system']
         self.assertIn('Deploy Helper', system)
         self.assertIn('skill ID: deploy-helper', system)
         self.assertIn('load it with the skill tool using its exact skill ID', system)

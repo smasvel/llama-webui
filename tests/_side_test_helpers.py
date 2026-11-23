@@ -1,4 +1,4 @@
-"""Common test helper to exercise Hearth's backend paths on either side."""
+"""Common test helper to exercise llama_web's backend paths on either side."""
 from __future__ import annotations
 
 import time

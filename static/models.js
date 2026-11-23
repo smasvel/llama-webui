@@ -246,7 +246,7 @@
     }
     // Editable served context for backends that take ctx-size at load time. The saved
     // value is reused on every later Load, so an unloaded model keeps the chosen window.
-    const contextEditable = m.context_editable === true || ["lemonade", "lmstudio", "vllm", "kobold"].includes(m.backend);
+    const contextEditable = m.context_editable === true || ["lemonade", "lmstudio", "vllm", "kobold", "q38rocm"].includes(m.backend);
     if (contextEditable && m.type && !NON_CHAT.includes(m.type) && m.type !== "embedding") {
       const activeContext = Number(m.configured_context_length || m.loaded_context_length || m.context_window_tokens);
       const loadedContext = Number(m.loaded_context_length);
@@ -396,7 +396,7 @@
       const thinkingInput = document.createElement("input");
       thinkingInput.type = "checkbox";
       thinkingInput.checked = m.enable_thinking !== false;
-      thinkingInput.disabled = isBusy || window.hearthModelTests?.isRunning();
+      thinkingInput.disabled = isBusy || window.llamaWebModelTests?.isRunning();
       thinkingInput.setAttribute("aria-label", `Enable thinking for ${m.id}`);
       thinkingInput.addEventListener("change", () => setModelThinking(m, thinkingInput));
       thinkingLabel.append(thinkingInput, document.createTextNode(" Enable thinking"));
@@ -491,7 +491,7 @@
     b.type = "button";
     b.className = "model-mini-btn" + (cls ? " " + cls : "");
     b.textContent = label;
-    if (disabled || window.hearthModelTests?.isRunning()) b.disabled = true;
+    if (disabled || window.llamaWebModelTests?.isRunning()) b.disabled = true;
     b.addEventListener("click", onClick);
     return b;
   }
@@ -598,7 +598,7 @@
   const ON_DEMAND_BACKENDS = new Set(["vllm", "kobold", "q38rocm", "fastflowlm"]);
 
   async function loadModel(modelKey) {
-    if (busy || window.hearthModelTests?.isRunning()) return;
+    if (busy || window.llamaWebModelTests?.isRunning()) return;
     const targetModel = models.find((m) => m.id === modelKey);
     const target = targetModel?.backend;
     const supportTypes = new Set(["embeddings", "embedding", "transcription", "tts"]);
@@ -645,7 +645,7 @@
   }
 
   async function unloadModel(id) {
-    if (busy || window.hearthModelTests?.isRunning()) return;
+    if (busy || window.llamaWebModelTests?.isRunning()) return;
     const target = models.find((m) => m.id === id)?.backend;
     // For the on-demand backends, "unload" isn't just freeing RAM — vllm_client/kobold_client/
     // fastflowlm_client's unload_model() all stop the whole systemd service (confirmed by
@@ -683,7 +683,7 @@
   }
 
   async function deleteModel(id) {
-    if (busy || window.hearthModelTests?.isRunning()) return;
+    if (busy || window.llamaWebModelTests?.isRunning()) return;
     const m = models.find((mm) => mm.id === id);
     const lines = [`Permanently delete "${id}" from disk? Frees storage (and memory if loaded), but you'd need to re-download it.`];
     // Each backend's delete_model() unloads first if this is the one currently being served

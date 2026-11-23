@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from hearth.backends import flm_tool_shim as shim
+from llama_web.backends import flm_tool_shim as shim
 
 
 BODY = {'tools': [{'type': 'function', 'function': {'name': name}}
@@ -108,7 +108,7 @@ class BlockedToolTests(unittest.TestCase):
                 response = shim.app.test_client().post('/v1/chat/completions', json={
                     **BODY, 'model': 'minicpm-v-4.7:1b', 'stream': stream,
                     'messages': [{'role': 'user', 'content': 'Fix it'},
-                                 {'role': 'tool', 'content': 'Hearth blocked an unsafe shell file-write/package-install command.'}]})
+                                 {'role': 'tool', 'content': 'llama_web blocked an unsafe shell file-write/package-install command.'}]})
                 self.assertEqual(response.status_code, 200)
                 event = json.loads(response.data.splitlines()[0][6:]) if stream else response.json
                 self.assertEqual(event['choices'][0]['finish_reason'], 'stop')

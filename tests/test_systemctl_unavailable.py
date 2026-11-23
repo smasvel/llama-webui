@@ -1,8 +1,8 @@
 import unittest
 import unittest.mock
 
-from hearth.backends import kobold_client
-from hearth.backends import vllm_client as vllm
+from llama_web.backends import kobold_client
+from llama_web.backends import vllm_client as vllm
 
 
 def _raise_missing(*args, **kwargs):
@@ -10,7 +10,7 @@ def _raise_missing(*args, **kwargs):
 
 
 class SystemctlUnavailableTests(unittest.TestCase):
-    """Docker Hearth has no systemd; the host systemd units must surface as a normal
+    """Docker llama_web has no systemd; the host systemd units must surface as a normal
     backend error instead of a raw 500 page the browser cannot parse."""
 
     def test_vllm_systemctl_missing_is_wrapped(self):

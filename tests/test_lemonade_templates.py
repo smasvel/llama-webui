@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from hearth.backends import lemonade_templates
-from hearth.backends import lemonade_guard_shim
+from llama_web.backends import lemonade_templates
+from llama_web.backends import lemonade_guard_shim
 
 
 class DevstralTemplateTests(unittest.TestCase):

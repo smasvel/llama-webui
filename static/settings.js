@@ -5,7 +5,7 @@
   const settingsForm = document.getElementById("settings-form");
   const restartBackendsBtn = document.getElementById("restart-backends");
   const restartQ38rocmBtn = document.getElementById("restart-q38rocm");
-  const restartHearthBtn = document.getElementById("restart-hearth");
+  const restartHearthBtn = document.getElementById("restart-llama-web");
   const restartResults = document.getElementById("restart-results");
   const restartStatusEl = document.getElementById("restart-status");
   const restartHistoryEl = document.getElementById("restart-history");
@@ -124,7 +124,7 @@
       }
       const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]').content }, body: JSON.stringify(body) });
       const data = await response.json();
-      if (url.endsWith("restart-hearth")) {
+      if (url.endsWith("restart-llama-web")) {
         restartResults.textContent = data.message || "Hearth is restarting.";
         if (data.job_id) pollRestartJob(data.job_id);
       } else {
@@ -140,7 +140,7 @@
   }
   restartBackendsBtn?.addEventListener("click", () => adminAction("/api/admin/restart-backends", "Restart selected backends"));
   restartQ38rocmBtn?.addEventListener("click", () => adminAction("/api/admin/restart-q38rocm", "Restart q38rocm"));
-  restartHearthBtn?.addEventListener("click", () => adminAction("/api/admin/restart-hearth", "Restart Hearth"));
+  restartHearthBtn?.addEventListener("click", () => adminAction("/api/admin/restart-llama-web", "Restart Hearth"));
   const settingsLmstudioUrlEl = document.getElementById("settings-lmstudio-url");
   const settingsLmstudioKeyEl = document.getElementById("settings-lmstudio-key");
   const settingsLemonadeUrlEl = document.getElementById("settings-lemonade-url");

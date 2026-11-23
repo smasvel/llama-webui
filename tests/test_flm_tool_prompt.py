@@ -1,5 +1,5 @@
 import unittest
-from hearth.backends.flm_tool_shim import _inject_tools_block, _ensure_no_thinking
+from llama_web.backends.flm_tool_shim import _inject_tools_block, _ensure_no_thinking
 
 
 class ToolPromptTests(unittest.TestCase):

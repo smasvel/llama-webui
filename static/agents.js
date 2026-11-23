@@ -457,7 +457,7 @@
         enable_thinking:source.enable_thinking !== false, model:source.model,
         skills:source.skills || [],
       };
-      sessionStorage.setItem('hearth-agent-clone-draft',JSON.stringify(draft));
+      sessionStorage.setItem('llama-web-agent-clone-draft',JSON.stringify(draft));
       window.location.assign('/agents/new?clone=1');
     } catch(error) {
       if(el('agent-network'))el('agent-network').textContent=`Could not copy task settings: ${error.message}`;
@@ -583,7 +583,7 @@
     try {
       const created=await api('/api/agent-tasks',payload);
       if (created.origin_conversation_id) {
-        sessionStorage.setItem('hearth-current-chat', created.origin_conversation_id);
+        sessionStorage.setItem('llama-web-current-chat', created.origin_conversation_id);
       }
       window.location.assign(`/agents/${created.id}`);
     }
@@ -623,8 +623,8 @@
   });
   if(page==='new' && new URLSearchParams(window.location.search).has('clone')) {
     try {
-      cloneDraft=JSON.parse(sessionStorage.getItem('hearth-agent-clone-draft') || 'null');
-      sessionStorage.removeItem('hearth-agent-clone-draft');
+      cloneDraft=JSON.parse(sessionStorage.getItem('llama-web-agent-clone-draft') || 'null');
+      sessionStorage.removeItem('llama-web-agent-clone-draft');
       const form=el('agent-create');
       if(cloneDraft && form) {
         for(const name of ['title','goal','assignee','criteria','technical_requirements','memory_notes','html_requirements','result_label','result_platform','verification_command','shell_mode','max_cycles','opencode_steps','verification_timeout']) {

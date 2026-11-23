@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <script src="{{ asset('csrf.js') }}"></script>
-  <title>Hearth</title>
+  <title>llama-web</title>
   <link rel="stylesheet" href="{{ asset('style.css') }}" />
 </head>
 <body>
@@ -61,7 +61,6 @@
           <a href="{{ url_for('models_page') }}" class="icon-btn text-icon-btn" title="Manage models">Models</a>
           <a href="{{ url_for('downloads_page') }}" class="icon-btn text-icon-btn" title="Download models">Downloads</a>
           <a href="{{ url_for('browse_history_page') }}" class="icon-btn text-icon-btn" title="AI browser history">History</a>
-          <a href="{{ url_for('metrics_page') }}" class="icon-btn text-icon-btn" title="Performance metrics">Metrics</a>
           <a href="{{ url_for('live_logs_page') }}" class="icon-btn text-icon-btn" title="Live developer logs">Live logs</a>
           <button id="security-scan-btn" class="icon-btn text-icon-btn" type="button"
                   title="Run a read-only host security scan in admin chat">Security</button>
@@ -98,45 +97,30 @@
             self-reported (and spoofable) User-Agent string.
           </p>
           <p class="help-heading">Current model inventory</p>
-          <p class="hint">This list is populated from Hearth's live model inventory and refreshes with the chat model list. Context shows the model's reported maximum when known, otherwise its active, configured, or backend-default context. Tool-call support is shown only when the backend reports it; unknown means the capability has not been reported.</p>
+          <p class="hint">This list is populated from llama-web's live model inventory and refreshes with the chat model list. Context shows the model's reported maximum when known, otherwise its active, configured, or backend-default context. Tool-call support is shown only when the backend reports it; unknown means the capability has not been reported.</p>
           <div id="help-model-inventory" class="help-model-inventory" aria-live="polite">
             <p class="hint">Loading current models…</p>
           </div>
-          <p class="help-heading">Client tracking with X-Hearth-Client</p>
+          <p class="help-heading">Client tracking with X-llama-web-Client</p>
           <p class="hint">
             <strong>LM Studio tool calls:</strong> the authenticated API supports
             <code class="inline-code">tool_choice: auto</code>,
             <code class="inline-code">required</code>, and named-function choices through
-            Hearth's compatibility proxy. For reasoning models such as Qwen, allow at least
+            llama-web's compatibility proxy. For reasoning models such as Qwen, allow at least
             1,024 output tokens for tool requests: reasoning and function arguments share
             the same output budget. The proxy preserves your requested token cap.
           </p>
-          {% if agentic_workflow_enabled %}<p class="hint"><strong>Persistent agents:</strong> open <a href="{{ url_for('agents_page') }}">Agents</a>, assign a goal, acceptance criteria and model, then start. Each account has a private project workspace. Work continues after closing the browser and reconnects after Hearth restarts. Answer questions and permissions on the Agents page; pause or stop at any time. Supply a verification command for independently checked completion. Without one, completion is agent-reported. Cycle limits and repeated blockers require review and Resume.</p>{% endif %}
+          {% if agentic_workflow_enabled %}<p class="hint"><strong>Persistent agents:</strong> open <a href="{{ url_for('agents_page') }}">Agents</a>, assign a goal, acceptance criteria and model, then start. Each account has a private project workspace. Work continues after closing the browser and reconnects after llama-web restarts. Answer questions and permissions on the Agents page; pause or stop at any time. Supply a verification command for independently checked completion. Without one, completion is agent-reported. Cycle limits and repeated blockers require review and Resume.</p>{% endif %}
           <p id="help-flm-status" class="hint">{{ help.flm_status }}</p>
-          <p class="hint">
-            <strong>Test and repair models:</strong> open
-            <a href="{{ url_for('model_tests_page') }}">Model tests &amp; automatic repair</a>.
-            Use <strong>Test default model</strong> on a model card or <strong>Test all chat models</strong>
-            for a sequential run. Tests include multi-step OpenCode builds, question prompts with
-            single/multiple choices and custom answers, dismissed questions, denied permissions,
-            parallel reads, checkpoint resume, and edit/test recovery. Answers and tool results are simulated;
-            each step checks the model response before continuing. Progress and reports survive
-            closing the browser. Automatic repair is optional. When enabled, it
-            tests a reversible compatibility profile against the full suite and keeps it
-            only when failures decrease without introducing regressions. Remaining failures
-            stay visible; a model may need a different runtime or stronger coding capabilities.
-            Use <strong>Reset repair</strong> to undo a profile. Generated tools are inspected,
-            not executed against your files, shell, or connected accounts.
-          </p>
           <p class="hint">
             Generated client context limits follow each model's runtime or configured context,
             with model-specific FastFlowLM limits where known. The inventory above shows the
-            current values reported by Hearth. Input and output share the context window. For
+            current values reported by llama-web. Input and output share the context window. For
             OpenCode, select <code class="inline-code">flm-small</code> to reduce tool overhead;
             refresh Help and re-copy the generated configuration after changing available models.
           </p>
           <p class="hint">
-            Add <code class="inline-code">X-Hearth-Client</code> to every OpenAI-compatible
+            Add <code class="inline-code">X-llama-web-Client</code> to every OpenAI-compatible
             request. Its value becomes the client name shown in Metrics, recent requests, and
             the live developer log, including the streamed request/response trace. Use a stable,
             descriptive lowercase name such as <code class="inline-code">market_analysis</code>,
@@ -150,14 +134,14 @@
           <div class="code-wrap">
             <pre class="download-log">curl -kN https://{{ help.lan_ip }}:{{ help.ports.lemonade }}/v1/chat/completions \
   -H "Authorization: Bearer {{ help.lan_token }}" \
-  -H "X-Hearth-Client: my_app" \
+  -H "X-llama-web-Client: my_app" \
   -H "Content-Type: application/json" \
   -d '{"model":"<span id="help-curl-model">MODEL_ID_FROM_CURRENT_INVENTORY</span>","messages":[{"role":"user","content":"Hello"}],"max_tokens":256,"stream":true}'</pre>
           </div>
           <p class="hint">
             The generated Continue and OpenCode configurations below already include
-            <code class="inline-code">X-Hearth-Client: vscode_continue</code> and
-            <code class="inline-code">X-Hearth-Client: opencode</code>, respectively. Give every
+            <code class="inline-code">X-llama-web-Client: vscode_continue</code> and
+            <code class="inline-code">X-llama-web-Client: opencode</code>, respectively. Give every
             additional application its own value so traffic can be filtered and debugged
             independently.
           </p>
@@ -355,14 +339,14 @@
               OpenCode running on this desktop, because its server listens on loopback. The desktop
               OpenCode config sync adds it to
               <code class="inline-code">~/.config/opencode/opencode.jsonc</code> when its GGUF is
-              installed; load the model from Hearth's Models page before selecting it in OpenCode.
+              installed; load the model from llama-web's Models page before selecting it in OpenCode.
               Its context and loaded state are reported in the inventory above; larger contexts
               use more shared GPU memory and can take longer to prefill and generate.
               It is not added to the LAN or Tailscale configs shown here.
             </p>
             <p class="hint">
               The top-level <code class="inline-code">"model"</code> uses the saved default from
-              Settings when available; otherwise Hearth selects an available model, preferring one
+              Settings when available; otherwise llama-web selects an available model, preferring one
               that is already loaded so the first request can start without a model load.
             </p>
             <p class="hint">
@@ -378,7 +362,7 @@
               and update the key here to match.
             </p>
             <p class="hint">
-              Context and output limits are generated per model. Hearth uses the active runtime
+              Context and output limits are generated per model. llama-web uses the active runtime
               context for loaded models, then a saved model-specific context, a reported model
               maximum, or the backend default where available. Input and output share the context
               window; OpenCode's output limit is capped to leave room for the prompt. Reload a
@@ -399,7 +383,7 @@
             <summary><strong>Connect over Tailscale</strong></summary>
             {% if help.tailscale_app_url %}
             <p class="hint" style="margin-top: 8px;">
-              Connect your device to the same Tailscale network, then open Hearth using its
+              Connect your device to the same Tailscale network, then open llama-web using its
               DNS name. These links use trusted HTTPS through Tailscale Serve.
             </p>
             <ul>
@@ -425,7 +409,7 @@
               tokens are preserved and Caddy reloads automatically:
             </p>
             <pre class="download-log">sudo "$(pwd)/.venv/bin/python" tools/caddy_gateway_setup.py \
-  --state-file "$HOME/.local/share/hearth/Caddyfile" \
+  --state-file "$HOME/.local/share/llama-web/Caddyfile" \
   --owner "$USER" --system-file /etc/caddy/Caddyfile</pre>
             <p class="hint">
               The LAN and Tailscale client configs are both available below. Choose the
@@ -436,7 +420,7 @@
             <p class="help-heading" style="margin-top: 16px;">Trust the CA — Tailscale-only devices</p>
             <p class="hint">
               Run the command for your operating system once to trust the backend API
-              certificate. The download uses Hearth's DNS link when Tailscale Serve is available.
+              certificate. The download uses llama-web's DNS link when Tailscale Serve is available.
               If you already installed this Caddy CA using Step 1, skip this step.
             </p>
             <p class="hint" style="margin-top: 8px;"><strong>Linux</strong> (bash):</p>
@@ -533,7 +517,7 @@
               Diagnose from the other machine with
               <code class="inline-code">curl -sk https://{{ help.lan_ip }}:{{ help.ports.lemonade }}/v1/models -H
               "Authorization: Bearer &lt;token above&gt;" -H
-              "X-Hearth-Client: connectivity_test"</code> — an immediate JSON reply means
+              "X-llama-web-Client: connectivity_test"</code> — an immediate JSON reply means
               the port is open; a hang means firewall. Fix on this machine:
               <code class="inline-code">sudo ufw allow 8444/tcp</code> (and
               <code class="inline-code">8445/tcp</code>), needs a password.
@@ -548,7 +532,7 @@
               <strong>Verify the backend's current model list</strong> before troubleshooting TLS:
               <code class="inline-code">curl -s https://{{ help.lan_ip }}:{{ help.ports.lemonade }}/v1/models -H
               "Authorization: Bearer &lt;token above&gt;" -H
-              "X-Hearth-Client: connectivity_test"</code>. If the selected model id isn't
+              "X-llama-web-Client: connectivity_test"</code>. If the selected model id isn't
               available from that endpoint, re-copy the current generated config or select an
               available model.
             </p>

@@ -1,7 +1,7 @@
-"""Exercise Hearth's backend paths on a given side.
+"""Exercise llama_web's backend paths on a given side.
 
-Run inside the container for the Docker Hearth instance and on the host for the host
-Hearth instance, so each side is exercised one by one with the same code path."""
+Run inside the container for the Docker llama_web instance and on the host for the host
+llama_web instance, so each side is exercised one by one with the same code path."""
 from __future__ import annotations
 
 import json
@@ -16,13 +16,13 @@ from _side_test_helpers import as_admin, csrf, patch_admin, report  # noqa: E402
 
 
 def main() -> None:
-    from hearth.backends import kobold_client as kobold
-    from hearth.backends import lemonade_client as lemonade
-    from hearth.backends import lmstudio_client as lms
-    from hearth.backends import vllm_client as vllm
-    from hearth.backends import fastflowlm_client as flm
+    from llama_web.backends import kobold_client as kobold
+    from llama_web.backends import lemonade_client as lemonade
+    from llama_web.backends import lmstudio_client as lms
+    from llama_web.backends import vllm_client as vllm
+    from llama_web.backends import fastflowlm_client as flm
     import app
-    from hearth.backends import kobold_client
+    from llama_web.backends import kobold_client
 
     print("== backend inventory ==")
     for label, client in (
@@ -119,7 +119,7 @@ def main() -> None:
     lms.unload_model(lm_chat_model)
 
     print()
-    print("== Hearth API round-trips ==")
+    print("== llama_web API round-trips ==")
     up = patch_admin()
     up.start()
     client = as_admin()

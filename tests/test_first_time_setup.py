@@ -67,18 +67,18 @@ class FirstTimeSetupTests(unittest.TestCase):
         env_path.write_text('DATABASE_URL=postgresql://test/db\nFLASK_SECRET_KEY=legacy-session-secret\n')
         reports = self.root / 'data' / 'model-test-runs'
         with patch.dict('os.environ', {'FLASK_SECRET_KEY': 'legacy-session-secret'}, clear=False), \
-             patch('hearth.storage.database.DATA_DIR', self.root / 'data'), \
-             patch('hearth.storage.database.init_schema') as init_schema, \
-             patch('hearth.storage.users_store.init_db') as init_users, \
-             patch('hearth.storage.users_store.count_users', return_value=2), \
-             patch('hearth.agents.agent_store.init_db') as init_agents, \
-             patch('hearth.storage.model_metadata_store.init_db'), \
-             patch('hearth.storage.model_metadata_store.import_test_runs'), \
-             patch('hearth.storage.model_metadata_store.migrate_registry_file'), \
-             patch('hearth.storage.model_resource_warnings.init_db'), \
-             patch('hearth.storage.settings_store.init_db') as init_settings, \
-             patch('hearth.storage.settings_store.migrate_legacy_environment') as migrate_settings, \
-             patch('hearth.storage.secret_store.get_or_create_flask_key', return_value='stable-key') as save_secret:
+             patch('llama_web.storage.database.DATA_DIR', self.root / 'data'), \
+             patch('llama_web.storage.database.init_schema') as init_schema, \
+             patch('llama_web.storage.users_store.init_db') as init_users, \
+             patch('llama_web.storage.users_store.count_users', return_value=2), \
+             patch('llama_web.agents.agent_store.init_db') as init_agents, \
+             patch('llama_web.storage.model_metadata_store.init_db'), \
+             patch('llama_web.storage.model_metadata_store.import_test_runs'), \
+             patch('llama_web.storage.model_metadata_store.migrate_registry_file'), \
+             patch('llama_web.storage.model_resource_warnings.init_db'), \
+             patch('llama_web.storage.settings_store.init_db') as init_settings, \
+             patch('llama_web.storage.settings_store.migrate_legacy_environment') as migrate_settings, \
+             patch('llama_web.storage.secret_store.get_or_create_flask_key', return_value='stable-key') as save_secret:
             self.assertEqual(setup.initialize_application_storage(), 2)
             self.assertNotIn('FLASK_SECRET_KEY', __import__('os').environ)
         init_schema.assert_called_once_with()
@@ -91,7 +91,7 @@ class FirstTimeSetupTests(unittest.TestCase):
         self.assertFalse(reports.exists())
 
     def test_canonical_ddl_creates_runtime_settings_and_app_secrets(self):
-        schema = (Path(__file__).resolve().parents[1] / 'hearth/storage/database_schema.sql').read_text()
+        schema = (Path(__file__).resolve().parents[1] / 'llama_web/storage/database_schema.sql').read_text()
         self.assertIn('CREATE TABLE IF NOT EXISTS settings', schema)
         self.assertIn('CREATE TABLE IF NOT EXISTS app_secrets', schema)
         self.assertIn('CREATE TABLE IF NOT EXISTS agent_tasks', schema)
@@ -102,9 +102,9 @@ class FirstTimeSetupTests(unittest.TestCase):
         self.assertFalse(setup.has_sqlite_data())
 
     def test_service_handles_spaces_and_percent_specifiers(self):
-        content = setup.service_text(Path('/home/user/AI Projects/100% hearth'))
-        self.assertIn('WorkingDirectory=/home/user/AI Projects/100%% hearth', content)
-        self.assertIn('"/home/user/AI Projects/100%% hearth/.venv/bin/python"', content)
+        content = setup.service_text(Path('/home/user/AI Projects/100% llama_web'))
+        self.assertIn('WorkingDirectory=/home/user/AI Projects/100%% llama_web', content)
+        self.assertIn('"/home/user/AI Projects/100%% llama_web/.venv/bin/python"', content)
         self.assertNotIn('/home/YOUR_USERNAME/', content)
 
     def test_agent_runtime_is_built_when_missing(self):
@@ -115,7 +115,7 @@ class FirstTimeSetupTests(unittest.TestCase):
             setup.install_agent_runtime()
         self.assertEqual(run.call_count, 3)
         self.assertEqual(run.call_args_list[1].args[0][:5],
-                         ['docker', 'build', '--pull', '--tag', 'hearth-agent-opencode:2.1.2'])
+                         ['docker', 'build', '--pull', '--tag', 'llama_web-agent-opencode:2.1.2'])
 
     def test_agent_runtime_rebuild_option_refreshes_existing_image(self):
         with patch.object(setup.subprocess, 'run', side_effect=[
@@ -152,9 +152,9 @@ class FirstTimeSetupTests(unittest.TestCase):
 
     def test_initial_download_requires_confirmation_and_machine_capacity(self):
         catalog = [{'id': 'Ornith-1.5-9B-GGUF', 'size_gb': 5.0, 'downloaded': False}]
-        with patch('hearth.backends.lemonade_client.search_catalog', return_value=catalog), \
-             patch('hearth.backends.lemonade_client.pull_catalog_model', return_value=iter([{'percent': 50}, {'done': True}])) as pull, \
-             patch('hearth.storage.model_metadata_store.mark_model_downloaded') as record, \
+        with patch('llama_web.backends.lemonade_client.search_catalog', return_value=catalog), \
+             patch('llama_web.backends.lemonade_client.pull_catalog_model', return_value=iter([{'percent': 50}, {'done': True}])) as pull, \
+             patch('llama_web.storage.model_metadata_store.mark_model_downloaded') as record, \
              patch.object(setup.shutil, 'disk_usage', return_value=SimpleNamespace(free=12_000_000_000)), \
              patch.object(setup.psutil, 'virtual_memory', return_value=SimpleNamespace(available=12_000_000_000)):
             self.assertFalse(setup.offer_initial_model_download(lambda _: ''))
@@ -165,8 +165,8 @@ class FirstTimeSetupTests(unittest.TestCase):
 
     def test_initial_download_skips_when_disk_is_short(self):
         catalog = [{'id': 'Ornith-1.5-9B-GGUF', 'size_gb': 5.0, 'downloaded': False}]
-        with patch('hearth.backends.lemonade_client.search_catalog', return_value=catalog), \
-             patch('hearth.backends.lemonade_client.pull_catalog_model') as pull, \
+        with patch('llama_web.backends.lemonade_client.search_catalog', return_value=catalog), \
+             patch('llama_web.backends.lemonade_client.pull_catalog_model') as pull, \
              patch.object(setup.shutil, 'disk_usage', return_value=SimpleNamespace(free=5_000_000_000)), \
              patch.object(setup.psutil, 'virtual_memory', return_value=SimpleNamespace(available=12_000_000_000)):
             self.assertFalse(setup.offer_initial_model_download(lambda _: 'y'))

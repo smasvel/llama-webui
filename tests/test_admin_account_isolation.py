@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import app
-from hearth.storage import database
+from llama_web.storage import database
 
 
 class AdminAccountIsolationTests(unittest.TestCase):

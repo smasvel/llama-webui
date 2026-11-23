@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <script src="{{ asset('csrf.js') }}"></script>
-  <title>Download Models — Hearth</title>
+  <title>Download Models — llama-web</title>
   <link rel="stylesheet" href="{{ asset('style.css') }}" />
 </head>
 <body>
@@ -16,11 +16,9 @@
         <nav class="console-tabs">
           {% if agentic_workflow_enabled %}<a class="console-tab" href="{{ url_for('agents_page') }}">Agents</a>{% endif %}
           <a class="console-tab" href="{{ url_for('models_page') }}">Models</a>
-          <a class="console-tab" href="{{ url_for('model_tests_page') }}">Model tests</a>
           <a class="console-tab active" href="{{ url_for('downloads_page') }}">Downloads</a>
           <a class="console-tab" href="{{ url_for('flm_converter_page') }}">Converter</a>
           <a class="console-tab" href="{{ url_for('browse_history_page') }}">History</a>
-          <a class="console-tab" href="{{ url_for('metrics_page') }}">Metrics</a>
           <a class="console-tab" href="{{ url_for('live_logs_page') }}">Live logs</a>
           <a class="console-tab" href="{{ url_for('users_page') }}">Users</a>
           <a class="console-tab" href="{{ url_for('settings_page') }}">Settings</a>
@@ -72,11 +70,11 @@
 
         <div id="getting-started-banner" class="getting-started-banner hidden">
           <button id="getting-started-dismiss" class="getting-started-dismiss" type="button" title="Dismiss" aria-label="Dismiss">&times;</button>
-          <h2 style="margin-top: 0;">New to Hearth? Start here.</h2>
+          <h2 style="margin-top: 0;">New to llama-web? Start here.</h2>
           <p class="hint">
             The Lemonade search starts empty, and its catalog is browsed automatically when
             the page opens. Search for <strong>Ornith-1.5-9B-GGUF</strong> or another model
-            when you want to narrow the results. Choose Download to install a model; Hearth
+            when you want to narrow the results. Choose Download to install a model; llama-web
             does not start model downloads automatically.
             <strong>vLLM</strong> and <strong>FastFlowLM (NPU)</strong> also list ready-to-download
             suggestions when available.
@@ -106,7 +104,7 @@
         <div class="console-grid">
           <div class="console-card span-all">
             <h2>Video generation</h2>
-            <p class="hint">No free local video model is currently supported on this AMD integrated GPU. Hearth does not send video prompts to an external service.</p>
+            <p class="hint">No free local video model is currently supported on this AMD integrated GPU. llama-web does not send video prompts to an external service.</p>
           </div>
 
           <div class="console-card span-all">

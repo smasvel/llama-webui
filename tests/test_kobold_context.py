@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hearth.backends import kobold_client as kobold
+from llama_web.backends import kobold_client as kobold
 
 
 class KoboldContextTests(unittest.TestCase):

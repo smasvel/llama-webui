@@ -11,7 +11,7 @@ from werkzeug.serving import make_server
 
 
 def main():
-    if not os.environ.get("HEARTH_DATABASE_SCHEMA", "").startswith("hearth_test_"):
+    if not os.environ.get("LLAMA_WEB_DATABASE_SCHEMA", "").startswith("llama_web_test_"):
         raise SystemExit("Run this suite with tools/run_browser_test.py.")
     import app
 

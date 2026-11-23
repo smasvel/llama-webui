@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the README feature demo and its silent GIF preview from Hearth screenshots."""
+"""Render the README feature demo and its silent GIF preview from llama_web screenshots."""
 
 from __future__ import annotations
 
@@ -62,10 +62,10 @@ body{position:relative;background:radial-gradient(ellipse at 50% 42%,#1a2c31 0,#
 @keyframes wave{to{transform:scaleY(.3)}}@keyframes flare{0%,10%{left:-22%;opacity:0}15%{opacity:1}48%{opacity:.35}60%,100%{left:125%;opacity:0}}
 </style></head><body>
 <div class="glow"></div><div class="grid"></div><div class="grain"></div><div class="hero-orbit"></div>
-<div class="brand"><span class="mark">H</span><span>hearth<span style="color:#78dfb6">.</span></span><small>LOCAL AI WORKSPACE</small></div>
+<div class="brand"><span class="mark">H</span><span>llama_web<span style="color:#78dfb6">.</span></span><small>LOCAL AI WORKSPACE</small></div>
 <div class="topline"><b>PRIVATE BY DESIGN</b> &nbsp;·&nbsp; YOUR MODELS, YOUR RULES</div>
 <div class="scene-minions" id="minions"></div><main class="slides" id="slides"></main>
-<div class="footer"><strong>HEARTH &nbsp;·&nbsp; YOUR PRIVATE AI WORKSPACE</strong><span>LOCAL MODELS &nbsp;·&nbsp; REAL WORKFLOWS &nbsp;·&nbsp; ONE HOME</span><span id="counter">01 / 06</span></div><div class="progress" id="progress"></div>
+<div class="footer"><strong>LLAMA_WEB &nbsp;·&nbsp; YOUR PRIVATE AI WORKSPACE</strong><span>LOCAL MODELS &nbsp;·&nbsp; REAL WORKFLOWS &nbsp;·&nbsp; ONE HOME</span><span id="counter">01 / 06</span></div><div class="progress" id="progress"></div>
 <div class="screen-flare"></div>
 <script>
 const shots=__SHOTS__;
@@ -78,7 +78,7 @@ const scenes=[
  {kind:'closing',title:'Your models. Your data. Your rules.',sub:'A private AI workspace built to fit the way you work.',pills:['WEB RESEARCH','VOICE TOOLS','IMAGE & VIDEO','TAILSCALE ACCESS','OPEN SOURCE']}
 ];
 const slides=document.getElementById('slides');
-function productSlide(s,i){return `<section class="slide" data-scene="${i}"><div class="title">${s.title}</div><div class="subtitle">${s.sub}</div><div class="product-window"><div class="window-bar"><i></i><i></i><i></i><span>HEARTH / ${s.shot.toUpperCase()}</span></div><img src="${shots[s.shot]}"></div><div class="orbit-label label-a"><b>✦</b> &nbsp;${s.labels[0]}</div><div class="orbit-label label-b"><b>●</b> &nbsp;${s.labels[1]}</div><div class="orbit-label label-c"><b>↗</b> &nbsp;${s.labels[2]}</div><div class="scene-card"><strong>${s.labels[0]} &nbsp;·&nbsp; ${s.labels[1]}</strong><span>${s.chip}</span></div></section>`}
+function productSlide(s,i){return `<section class="slide" data-scene="${i}"><div class="title">${s.title}</div><div class="subtitle">${s.sub}</div><div class="product-window"><div class="window-bar"><i></i><i></i><i></i><span>LLAMA_WEB / ${s.shot.toUpperCase()}</span></div><img src="${shots[s.shot]}"></div><div class="orbit-label label-a"><b>✦</b> &nbsp;${s.labels[0]}</div><div class="orbit-label label-b"><b>●</b> &nbsp;${s.labels[1]}</div><div class="orbit-label label-c"><b>↗</b> &nbsp;${s.labels[2]}</div><div class="scene-card"><strong>${s.labels[0]} &nbsp;·&nbsp; ${s.labels[1]}</strong><span>${s.chip}</span></div></section>`}
 slides.innerHTML=scenes.map((s,i)=>s.kind==='hero'?`<section class="slide" data-scene="${i}"><div class="title">${s.eyebrow}</div><h1 class="headline">${s.head}</h1><div class="subhead">${s.sub}</div><div class="feature-pills">${s.pills.map(p=>`<span class="pill"><i></i>${p}</span>`).join('')}</div><div class="orbit-label label-a"><b>01</b> &nbsp; LOCAL MODEL CHAT</div><div class="orbit-label label-b"><b>02</b> &nbsp; REAL PROJECT AGENTS</div><div class="orbit-label label-c"><b>03</b> &nbsp; YOUR PRIVATE WORKSPACE</div></section>`:s.kind==='product'?productSlide(s,i):`<section class="slide" data-scene="${i}"><div class="closing"><span class="mark">H</span><h2>${s.title}</h2><p>${s.sub}</p><div class="closing-pills">${s.pills.map(p=>`<span class="pill"><i></i>${p}</span>`).join('')}</div></div></section>`).join('');
 const bots=document.getElementById('minions');
 const colors=['#7de3b9','#a9baff','#ffd08e','#d1aaff','#ff9c9c','#8be3dc'];
@@ -202,14 +202,14 @@ def render_frames(directory: Path) -> None:
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="hearth-demo-") as temp:
+    with tempfile.TemporaryDirectory(prefix="llama_web-demo-") as temp:
         tempdir = Path(temp)
         frames = tempdir / "frames"
         frames.mkdir()
         render_frames(frames)
         audio = tempdir / "score.wav"
         make_audio(audio)
-        mp4 = OUT / "hearth-feature-demo.mp4"
+        mp4 = OUT / "llama_web-feature-demo.mp4"
         subprocess.run([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
             "-framerate", str(FPS), "-i", str(frames / "frame_%05d.jpg"),
@@ -218,7 +218,7 @@ def main() -> None:
             "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart",
             str(mp4),
         ], check=True)
-        gif = OUT / "hearth-feature-demo.gif"
+        gif = OUT / "llama_web-feature-demo.gif"
         subprocess.run([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
             "-i", str(mp4), "-vf",
@@ -227,7 +227,7 @@ def main() -> None:
             "[s1][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle",
             "-loop", "0", str(gif),
         ], check=True)
-        poster = OUT / "hearth-feature-demo-poster.jpg"
+        poster = OUT / "llama_web-feature-demo-poster.jpg"
         subprocess.run([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
             "-ss", "1", "-i", str(mp4), "-frames:v", "1", "-q:v", "3",

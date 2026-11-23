@@ -743,7 +743,7 @@
     visibleGeneration = null;
     generationPlayback = null;
     setChatBusy(false);
-    sessionStorage.removeItem("hearth-current-chat");
+    sessionStorage.removeItem("llama-web-current-chat");
     currentConversationId = null;
     history = [];
     msgWraps = [];
@@ -789,7 +789,9 @@
       messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80;
     const scrollTop = messagesEl.scrollTop;
     const key = JSON.stringify([saved, generation?.status === "stopped"]);
-    if (key !== renderedMessagesKey) {
+    const appendedOneAssistant = renderedMessagesKey !== null && saved.length === history.length + 1 &&
+      saved[saved.length - 1]?.role === "assistant";
+    if (key !== renderedMessagesKey && !appendedOneAssistant) {
       renderedMessagesKey = key;
       history = saved.map((m) => ({ role: m.role, content: m.content }));
       msgWraps = [];
@@ -808,7 +810,7 @@
         else if (m.role === "assistant") {
           addAssistantControls(el._wrapEl);
           const agentButton = document.getElementById("chat-create-agent-btn");
-          if (agentButton && m.backend === "hearth-agent-draft") {
+          if (agentButton && m.backend === "llama-web-agent-draft") {
             const origin = saved.slice(0, index).reverse().find(message => message.role === "user");
             const action = document.createElement("button");
             action.type = "button";
@@ -817,7 +819,7 @@
             action.addEventListener("click", () => openAgentDraft(origin?.content || "", agentButton.dataset.draftUrl));
             el.append(action);
           }
-          if (agentButton && m.backend === "hearth-agent-schedule") {
+          if (agentButton && m.backend === "llama-web-agent-schedule") {
             const action = document.createElement("a");
             action.className = "panel-btn";
             action.href = agentButton.dataset.schedulesUrl;
@@ -826,6 +828,19 @@
           }
         }
       }
+    }
+    if (appendedOneAssistant) {
+      const m = saved[saved.length - 1];
+      if (activeReplyEl) { activeReplyEl._wrapEl.remove(); activeReplyEl = null; }
+      const el = addBubble(m.role, m.content, {
+        timestamp: new Date(m.created_at * 1000), duration: m.duration,
+        model: m.model, backend: m.backend, totalTokens: m.total_tokens,
+        topsUsed: m.tops_used, topsMax: m.tops_max, npuPercent: m.npu_percent,
+      }, m.reasoning);
+      msgWraps.push(el._wrapEl);
+      if (m.role === "assistant") addAssistantControls(el._wrapEl);
+      history = saved.map((mm) => ({ role: mm.role, content: mm.content }));
+      renderedMessagesKey = key;
     }
     // The persisted assistant wins as soon as it is saved; never append it twice.
     if (running && data.messages.length <= generation.base_message_count + 1) {
@@ -1015,7 +1030,7 @@
       if (currentConversationId !== id || conversationViewVersion !== version || requestNumber !== latestConversationRequest) return false;
       if (res.status === 404) { newChat(); return false; }
       if (!res.ok) throw new Error(data.error || "failed to load chat");
-      sessionStorage.setItem("hearth-current-chat", id);
+      sessionStorage.setItem("llama-web-current-chat", id);
       renderConversationSnapshot(data);
       renderConversationList();
       if (!refresh) {
@@ -1260,11 +1275,11 @@
           button.textContent = "Link copied";
         } else {
           const mimeType = isImage ? "image/png" : "video/webm";
-          const shareProbe = new File([], `hearth-generated.${isImage ? "png" : "webm"}`, { type: mimeType });
+          const shareProbe = new File([], `llama-web-generated.${isImage ? "png" : "webm"}`, { type: mimeType });
           if (navigator.canShare?.({ files: [shareProbe] })) {
             const blob = await loadBlob();
             const fileData = isImage ? await imageAsPng(blob) : blob;
-            const file = new File([fileData], `hearth-generated.${isImage ? "png" : "webm"}`, { type: mimeType });
+            const file = new File([fileData], `llama-web-generated.${isImage ? "png" : "webm"}`, { type: mimeType });
             await navigator.share({ title, files: [file] });
           } else {
             await navigator.share({ title, url: mediaUrl });
@@ -1839,8 +1854,11 @@
     }
   }
 
+  sendBtn.addEventListener("click", () => { if (!busy) chatForm.requestSubmit(); });
   chatForm.addEventListener("submit", (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
     if (busy) {
       stopGeneration();
       return;
@@ -1914,7 +1932,7 @@
     if (!currentConversationId) currentConversationId = crypto.randomUUID();
     const id = currentConversationId;
     const version = conversationViewVersion;
-    sessionStorage.setItem("hearth-current-chat", id);
+    sessionStorage.setItem("llama-web-current-chat", id);
     history.push({ role: "user", content: text });
     const userEl = addBubble("user", text, { timestamp: new Date() });
     msgWraps.push(userEl._wrapEl);
@@ -1944,7 +1962,7 @@
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       generationPlayback = { id: data.generation.id, spokenUpTo: 0, firstChunk: true, pendingSince: null,
         shouldSpeak: conversationMode || speakMode, finished: false };
-      await loadConversation(id, { refresh: true });
+      scheduleChatRefresh(id, version, 250);
       await fetchConversations();
     } catch (err) {
       if (currentConversationId !== id || conversationViewVersion !== version) return;
@@ -2769,6 +2787,6 @@
     chatUrl.searchParams.delete("conversation");
     window.history.replaceState(null, "", chatUrl);
   }
-  const previousChat = linkedChat || sessionStorage.getItem("hearth-current-chat");
+  const previousChat = linkedChat || sessionStorage.getItem("llama-web-current-chat");
   if (previousChat) loadConversation(previousChat);
 })();

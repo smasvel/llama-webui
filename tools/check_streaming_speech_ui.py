@@ -20,7 +20,7 @@ import app
 FIRST_PHRASE = "The first words are ready now"
 LAST_PHRASE = "The final sentence is ready."
 LONG_FIRST = "Here is the complete report for today."
-LIVE_TTS = os.environ.get("HEARTH_TEST_LIVE_TTS") == "1"
+LIVE_TTS = os.environ.get("LLAMA_WEB_TEST_LIVE_TTS") == "1"
 live_synthesize = app.lemonade.synthesize_speech
 release_model = threading.Event()
 speech_requests = []

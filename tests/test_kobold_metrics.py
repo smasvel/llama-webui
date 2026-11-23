@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 
-from hearth.backends import kobold_client
+from llama_web.backends import kobold_client
 from tools import test_flm_model as model_runner
 from tools.test_flm_model import _metric_tokens_per_second
 

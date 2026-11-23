@@ -1,10 +1,25 @@
-# Hearth
+# llama-web
 
-**A self-hosted workspace for local AI chat, model evaluation, and coding agents.**
+**A self-hosted workspace for local AI chat, model management, and coding agents.**
 
-[Install Hearth](#installation) · [Features](#features) ·
-[Supported backends](#supported-model-backends) ·
+[Fixed ports](#fixed-ports) · [Installation](#installation) · [Features](#features) ·
 [Development](#development)
+
+## Fixed ports
+
+These ports are part of the llama-web installation contract. Do not change them
+without updating the systemd units, Caddyfile, and client configuration together.
+
+| Port | Service | Binding | Purpose |
+|---|---|---|---|
+| 18471 | Caddy | `127.0.0.1` only | Local reverse proxy for OpenAI-compatible clients; forwards to 18474 |
+| 18472 | PostgreSQL | `127.0.0.1` only | Application database (`llama-web`) |
+| 18473 | llama.cpp engine (`llama-server`) | `127.0.0.1` only | Model inference, `/v1/models`, `/v1/chat/completions` |
+| 18474 | llama-web app | `0.0.0.0` | HTTPS web UI and API; Tailscale access uses this port |
+
+The app listens on 18474 with the `PORT=18474` environment variable set in
+`~/.config/systemd/user/llama-web.service`. The same value is used by the session
+cookie name, help/config generation, and the Tailscale certificate command.
 
 ## Features
 

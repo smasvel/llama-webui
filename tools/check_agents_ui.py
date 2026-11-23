@@ -10,12 +10,12 @@ import uuid
 from unittest.mock import Mock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import app
-from hearth.agents.agent_tasks import Manager, MARKER
+from llama_web.agents.agent_tasks import Manager, MARKER
 from playwright.sync_api import sync_playwright, expect
 from werkzeug.serving import make_server
 
 with contextlib.ExitStack() as stack:
- directory=stack.enter_context(tempfile.TemporaryDirectory(prefix='hearth-agent-browser-'))
+ directory=stack.enter_context(tempfile.TemporaryDirectory(prefix='llama_web-agent-browser-'))
  fake=Mock();model={'providerID':'fastflowlm','id':'flm/qwen3-it:4b'}
  fake.models.return_value=[{**model,'name':'Fixture Qwen'}];fake.create.return_value='ses_browser'
  snap={'active':True,'forms':[],'permissions':[],'inbox':[],'messages':[]}
@@ -150,6 +150,6 @@ with contextlib.ExitStack() as stack:
   expect(page.locator('#agent-activity')).to_contain_text('Rerun queued')
   assert page.locator('#agent-title img').count()==0
   assert not errors,errors
-  page.screenshot(path='/tmp/hearth-agents-ui.png',full_page=True)
+  page.screenshot(path='/tmp/llama_web-agents-ui.png',full_page=True)
   browser.close()
   print('PASS browser assignment, questions, multiple choices, permission reply, pause, reload, resume, verification and escaping')

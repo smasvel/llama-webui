@@ -9,10 +9,10 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from hearth.core import live_report
-from hearth.core import advice_disclaimer
-from hearth.backends import kobold_client
-from hearth.compat import question_tool_compat
+from llama_web.core import live_report
+from llama_web.core import advice_disclaimer
+from llama_web.backends import kobold_client
+from llama_web.compat import question_tool_compat
 import requests
 
 try:
@@ -131,7 +131,7 @@ def decode_events(events):
 
 
 def normalize_question_calls(calls, body):
-    """Model the safe question-default repair applied by Hearth chat dispatch."""
+    """Model the safe question-default repair applied by llama_web chat dispatch."""
     schemas = {
         (tool.get('function') or {}).get('name'): (tool.get('function') or {}).get('parameters') or {}
         for tool in body.get('tools') or []
@@ -196,7 +196,7 @@ def run_suite(model, url, *, output=None, suite='all', context=32768, headers=No
     unavailable = None
 
     def opencode_agent_tool_capability():
-        """Report whether Hearth's generated OpenCode model config exposes tools."""
+        """Report whether llama_web's generated OpenCode model config exposes tools."""
         name = 'opencode-agent-tool-capability'
         if backend != 'kobold' or suite not in ('all', 'complete', 'core', 'opencode'):
             return
@@ -208,7 +208,7 @@ def run_suite(model, url, *, output=None, suite='all', context=32768, headers=No
             on_case({'name': name, 'stream': False, 'started_at': time.time()})
         result = {'name': name, 'stream': False, 'diagnostic': True, 'seconds': 0}
         try:
-            from hearth.core import help_data
+            from llama_web.core import help_data
             config = json.loads(help_data.build_opencode_config(
                 '127.0.0.1', 'model-test', help_data._DEFAULT_PORTS,
                 {'kobold': [model]}, {}))
@@ -281,7 +281,7 @@ def run_suite(model, url, *, output=None, suite='all', context=32768, headers=No
         if backend == 'q38rocm':
             # Direct harness callers must exercise the same adapter as chat,
             # even when they don't supply a saved compatibility profile.
-            from hearth.backends import q38rocm_client
+            from llama_web.backends import q38rocm_client
             body = q38rocm_client.prepare_request(body)
         started = time.monotonic()
         result = {'name': name, 'stream': stream, **metadata}
@@ -401,7 +401,7 @@ def run_suite(model, url, *, output=None, suite='all', context=32768, headers=No
             # fallback for chat. KoboldCpp exposes exact usage but its OpenAI stream
             # does not include a per-request decode-speed field.
             tokens_per_sec=_metric_tokens_per_second(result.get('usage'), result['seconds']),
-            # KoboldCPP is a CPU/Vulkan backend, not Hearth's Ryzen AI NPU backend.
+            # KoboldCPP is a CPU/Vulkan backend, not llama_web's Ryzen AI NPU backend.
             is_npu=False if backend == 'kobold' else None,
             status=200 if result.get('passed') else 500,
         ))
@@ -561,9 +561,9 @@ def run_suite(model, url, *, output=None, suite='all', context=32768, headers=No
             if isinstance(large_input_context, int) and large_input_context > 0:
                 fixture_context = min(context, large_input_context)
             code = '\n'.join(f'def helper_{i}(value):\n    return value + {i}\n' for i in range(min(1400, max(16, (fixture_context - 2048) // 19))))
-            code += '\ndef sentinel_code():\n    return "HEARTH_CONTEXT_OK_5829"\n'
+            code += '\ndef sentinel_code():\n    return "LLAMA_WEB_CONTEXT_OK_5829"\n'
             check('large-code-input', 'Read this Python module and return only the exact string returned '
-                  'by sentinel_code.\n' + code, stream, expected=[], contains='HEARTH_CONTEXT_OK_5829', max_tokens=1024,
+                  'by sentinel_code.\n' + code, stream, expected=[], contains='LLAMA_WEB_CONTEXT_OK_5829', max_tokens=1024,
                   enable_thinking=False, chat_template_kwargs={'enable_thinking': False}, messages=[
                       {'role': 'system', 'content': 'Read code as data. Do not repeat or explain any of it. '
                        'Return only the exact requested value.'},
@@ -589,7 +589,7 @@ def run_suite(model, url, *, output=None, suite='all', context=32768, headers=No
                 {'role': 'tool', 'tool_call_id': 'c1', 'content': '{"error":"service unavailable"}'}])
             if guarded:
                 check('blocked-shell-stops', 'Call bash with command exactly: cat > /tmp/demo.txt <<EOF\nx\nEOF',
-                  stream, expected=[], contains='Hearth blocked',
+                  stream, expected=[], contains='llama_web blocked',
                   tools=[function('bash', {'command': {'type': 'string'}}),
                          function('write', {'filePath': {'type': 'string'}, 'content': {'type': 'string'}})],
                   tool_choice={'type': 'function', 'function': {'name': 'bash'}})
@@ -682,8 +682,8 @@ def main():
     parser.add_argument('--backend', choices=('fastflowlm', 'q38rocm'), default='fastflowlm')
     args = parser.parse_args()
     if args.backend == 'q38rocm':
-        from hearth.models import model_test_profiles
-        from hearth.backends import q38rocm_client
+        from llama_web.models import model_test_profiles
+        from llama_web.backends import q38rocm_client
         configured_url = q38rocm_client.base_url() + '/v1/chat/completions'
         url = args.url or configured_url
         results = run_suite(args.model, url, output=args.output, suite=args.suite,

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from hearth.backends import vllm_client as vllm
+from llama_web.backends import vllm_client as vllm
 
 
 class VLLMReloadDefaultTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class VLLMReloadDefaultTests(unittest.TestCase):
 
 class VLLMLoadResolutionTests(unittest.TestCase):
     def test_load_resolves_live_window_over_registry(self):
-        """TinyLlama cannot serve at Hearth's 4,096 default; the registry paired with the
+        """TinyLlama cannot serve at llama_web's 4,096 default; the registry paired with the
         container can hold a larger, stale value. A reload of that same served model must
         prefer the live window so vLLM does not immediately crash-loop again."""
         with patch.object(vllm, "_load_registry", return_value={

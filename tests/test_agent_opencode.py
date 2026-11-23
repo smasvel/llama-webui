@@ -4,16 +4,16 @@ import hashlib
 from unittest.mock import Mock, patch
 import requests
 import socket
-from hearth.agents.agent_opencode import OpenCode
-from hearth.agents import agent_container
-from hearth.agents.agent_container import ContainerOpenCode, _ModelProxy, _system_ca_bundle
+from llama_web.agents.agent_opencode import OpenCode
+from llama_web.agents import agent_container
+from llama_web.agents.agent_container import ContainerOpenCode, _ModelProxy, _system_ca_bundle
 import tempfile
 from pathlib import Path
 
 
 class OpenCodeAdapterTests(unittest.TestCase):
     def test_container_permissions_allow_project_and_auto_mode_without_approval(self):
-        client=ContainerOpenCode('/tmp/hearth-agent-test')
+        client=ContainerOpenCode('/tmp/llama_web-agent-test')
         rules=client._permissions({'auto_commands':True})
         self.assertEqual(rules[0],{'action':'external_directory','resource':'/home/node/agents/project/*','effect':'allow'})
         self.assertEqual(rules[1],{'action':'*','resource':'*','effect':'allow'})
@@ -23,7 +23,7 @@ class OpenCodeAdapterTests(unittest.TestCase):
         self.assertEqual(rules[-1],{'action':'execute','resource':'*','effect':'deny'})
 
     def test_container_permissions_ask_only_for_shell_when_requested(self):
-        client=ContainerOpenCode('/tmp/hearth-agent-test')
+        client=ContainerOpenCode('/tmp/llama_web-agent-test')
         rules=client._permissions({'auto_commands':False})
         self.assertEqual(rules[2],{'action':'shell','resource':'*','effect':'ask'})
 
@@ -81,7 +81,7 @@ class OpenCodeAdapterTests(unittest.TestCase):
 
     def test_small_context_models_are_visible_but_not_assignable(self):
         client=OpenCode()
-        with patch.object(client,'call',return_value={'data':[{'providerID':'fastflowlm','id':'flm/qwen3.8-mtp:27b','name':'Qwen'}]}), patch('hearth.agents.agent_opencode.flm_context.context_limit',return_value=8192):
+        with patch.object(client,'call',return_value={'data':[{'providerID':'fastflowlm','id':'flm/qwen3.8-mtp:27b','name':'Qwen'}]}), patch('llama_web.agents.agent_opencode.flm_context.context_limit',return_value=8192):
             model=client.models()[0]
         self.assertFalse(model['usable']);self.assertEqual(model['context'],8192)
 
@@ -101,20 +101,20 @@ class OpenCodeAdapterTests(unittest.TestCase):
 
 class ContainerRecoveryTests(unittest.TestCase):
     def test_hosted_picker_replaces_stale_desktop_catalog(self):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         stale = [{'providerID': 'opencode', 'id': 'retired-free'},
                  {'providerID': 'lmstudio', 'id': 'local-model'}]
         config = {'provider': {'opencode': {'models': {
             'current-model': {'limit': {'context': 65536}},
         }}}}
         with patch.object(OpenCode, 'models', return_value=stale), \
-             patch('hearth.agents.agent_container._generated_model_config', return_value=config):
+             patch('llama_web.agents.agent_container._generated_model_config', return_value=config):
             models = client.models()
         self.assertEqual([(m['providerID'], m['id']) for m in models],
                          [('lmstudio', 'local-model'), ('opencode', 'current-model')])
 
     def test_hosted_relay_uses_current_plan_and_key(self):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         old = {'provider': {'opencode': {'models': {'model': {}}, 'options': {
             'baseURL': 'https://example.com/previous/v1', 'apiKey': 'old-key',
         }}}}
@@ -122,22 +122,22 @@ class ContainerRecoveryTests(unittest.TestCase):
         current['provider']['opencode']['options'] = {
             'baseURL': 'https://example.com/current/v1', 'apiKey': 'current-key',
         }
-        with patch('hearth.agents.agent_container.parse_jsonc', return_value=old), \
-             patch('hearth.agents.agent_container._generated_model_config', return_value=current):
+        with patch('llama_web.agents.agent_container.parse_jsonc', return_value=old), \
+             patch('llama_web.agents.agent_container._generated_model_config', return_value=current):
             _, _, relay = client._host_provider('opencode', 'model', '/tmp/test.sock', 'Test')
         self.assertEqual(relay['base_url'], 'https://example.com/current/v1')
         # Hosted credentials are resolved by the host proxy at request time.
         self.assertIsNone(relay['api_key'])
 
     def test_kobold_agent_relay_enables_tools_for_stale_model_metadata(self):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         config = {'provider': {'kobold': {
             'models': {'kobold-model': {'limit': {'context': 8192},
                                         'capabilities': {'tools': False}}},
             'options': {'baseURL': 'https://kobold.example/v1', 'apiKey': 'test-key'},
         }}}
-        with patch('hearth.agents.agent_container.parse_jsonc', return_value=config), \
-             patch('hearth.agents.agent_container._generated_model_config', return_value=None):
+        with patch('llama_web.agents.agent_container.parse_jsonc', return_value=config), \
+             patch('llama_web.agents.agent_container._generated_model_config', return_value=None):
             _, provider, _ = client._host_provider(
                 'kobold', 'kobold-model', '/tmp/model.sock', 'Test agent')
         self.assertTrue(provider['models']['kobold-model']['capabilities']['tools'])
@@ -147,7 +147,7 @@ class ContainerRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             client = ContainerOpenCode(directory)
             task_id = 'c' * 32
-            name = 'hearth-agent-' + task_id[:24]
+            name = 'llama_web-agent-' + task_id[:24]
             job = {'id': task_id, 'owner': 'owner-1',
                    'model': {'providerID': 'lmstudio', 'id': 'model'},
                    'session_id': name + '::saved-session'}
@@ -169,9 +169,9 @@ class ContainerRecoveryTests(unittest.TestCase):
             restore.assert_called_once_with(name, 'owner-1', workspace_id=task_id)
 
     def test_resume_rebuilds_container_when_selected_skill_content_changes(self):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         job = {'id': 'c'*32, 'model': {'providerID': 'lmstudio', 'id': 'fixture'},
-               'enable_thinking': True, 'session_id': 'hearth-agent-'+'c'*24+'::old'}
+               'enable_thinking': True, 'session_id': 'llama_web-agent-'+'c'*24+'::old'}
         info = {'tool_policy_version': 'native-tools-v2',
                 'model_proxy': {'skill_bundle_hash': 'old-skill-hash',
                                 'agent_prompt_version': agent_container.AGENT_PROMPT_VERSION,
@@ -195,13 +195,13 @@ class ContainerRecoveryTests(unittest.TestCase):
             with patch.object(client, '_make_proxy'), \
                  patch.object(client, '_docker', side_effect=['true', '127.0.0.1:43001']), \
                  patch.object(client, '_write_runtime') as write_runtime:
-                endpoint = client._endpoint('hearth-agent-' + 'a' * 24, info)
+                endpoint = client._endpoint('llama_web-agent-' + 'a' * 24, info)
             self.assertEqual(endpoint.endpoint, 'http://127.0.0.1:43001')
             self.assertEqual(info['port'], 43001)
             write_runtime.assert_called_once()
 
     def test_agent_config_controls_thinking_and_preserves_template_options(self):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         provider = {'options': {'extraBody': {'chat_template_kwargs': {'temperature': 0.2}, 'keep': 'yes'}}}
         enabled = client._agent_config({'enable_thinking': True}, 'lemonade', 'model', copy.deepcopy(provider))
         disabled = client._agent_config({'enable_thinking': False}, 'lemonade', 'model', copy.deepcopy(provider))
@@ -211,16 +211,16 @@ class ContainerRecoveryTests(unittest.TestCase):
         self.assertEqual(disabled['provider']['lemonade']['options']['extraBody']['keep'], 'yes')
 
     def test_opencode_agent_config_omits_unsupported_template_kwargs(self):
-        client = ContainerOpenCode('/tmp/hearth-agent-config-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-config-test')
         provider = {'options': {'extraBody': {
             'chat_template_kwargs': {'temperature': 0.2}, 'keep': 'yes'}}}
         config = client._agent_config({'enable_thinking': True}, 'opencode', 'beam-free', provider)
-        extra = config['provider']['hearth-opencode']['options']['extraBody']
+        extra = config['provider']['llama_web-opencode']['options']['extraBody']
         self.assertNotIn('chat_template_kwargs', extra)
         self.assertEqual(extra['keep'], 'yes')
 
     def test_agent_config_enables_compaction_by_default(self):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         provider = {'options': {}, 'models': {
             'model': {'limit': {'context': 32768, 'output': 8192}}}}
         config = client._agent_config({}, 'lemonade', 'model', provider)
@@ -238,10 +238,10 @@ class ContainerRecoveryTests(unittest.TestCase):
                       'api_key': 'key', 'headers': {}, 'verify_tls': True}
         self.assertTrue(ContainerOpenCode._can_reuse_container(existing, job, config, proxy_info))
 
-    @patch('hearth.core.help_data.compaction_settings',
+    @patch('llama_web.core.help_data.compaction_settings',
            return_value={'auto': True, 'keep_tokens': None, 'buffer': None})
     def test_agent_config_bounds_compaction_to_selected_model_context(self, _settings):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         provider = {'options': {}, 'models': {'model': {'limit': {'context': 65536, 'output': 8192}}}}
         config = client._agent_config(
             {'compaction': {'auto': True, 'keep': {'tokens': 65536}, 'buffer': 1024}},
@@ -250,10 +250,10 @@ class ContainerRecoveryTests(unittest.TestCase):
             'auto': True, 'keep': {'tokens': 59051}, 'buffer': 5461,
         })
 
-    @patch('hearth.core.help_data.compaction_settings',
+    @patch('llama_web.core.help_data.compaction_settings',
            return_value={'auto': True, 'keep_tokens': None, 'buffer': None})
     def test_agent_config_does_not_narrow_loaded_context_when_smaller_siblings_exist(self, _settings):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         provider = {'options': {}, 'models': {
             'Muse-Glimmer-30B-GGUF': {'limit': {'context': 65536, 'output': 8192}},
             'Muse-Sibri-3.6B-GGUF': {'limit': {'context': 1024, 'output': 1024}},
@@ -266,10 +266,10 @@ class ContainerRecoveryTests(unittest.TestCase):
             'auto': True, 'keep': {'tokens': 59051}, 'buffer': 5461,
         })
 
-    @patch('hearth.core.help_data.compaction_settings',
+    @patch('llama_web.core.help_data.compaction_settings',
            return_value={'auto': True, 'keep_tokens': None, 'buffer': None})
     def test_agent_config_scales_compaction_for_each_loaded_context_window(self, _settings):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         for model, context, expected_keep, expected_buffer in (
             ('Muse-Glimmer-30B-GGUF', 65536, 59051, 5461),
             ('Muse-Sibri-3.6B-GGUF', 131072, 118102, 10922),
@@ -285,7 +285,7 @@ class ContainerRecoveryTests(unittest.TestCase):
                 self.assertEqual(config['compaction']['buffer'], expected_buffer)
 
     def test_agent_config_caps_an_oversized_compaction_buffer_to_the_model_window(self):
-        client = ContainerOpenCode('/tmp/hearth-agent-test')
+        client = ContainerOpenCode('/tmp/llama_web-agent-test')
         provider = {'options': {}, 'models': {
             'Muse-Glimmer-30B-GGUF': {'limit': {'context': 65536, 'output': 8192}}}}
         config = client._agent_config(
@@ -319,8 +319,8 @@ class ContainerRecoveryTests(unittest.TestCase):
             task_id = 'a' * 32
             task_dir = client.runtime_directory / task_id
             task_dir.mkdir()
-            with patch('hearth.agents.agent_container.agent_store.get_task', return_value={'id': task_id, 'status': 'interrupted'}), \
-                 patch('hearth.agents.agent_container.agent_store.get_runtime', return_value={'container': 'hearth-agent-' + task_id[:24]}), \
+            with patch('llama_web.agents.agent_container.agent_store.get_task', return_value={'id': task_id, 'status': 'interrupted'}), \
+                 patch('llama_web.agents.agent_container.agent_store.get_runtime', return_value={'container': 'llama_web-agent-' + task_id[:24]}), \
                  patch.object(client, '_docker') as docker:
                 client.migrate_legacy_runtime()
             self.assertTrue(task_dir.exists())
@@ -332,20 +332,20 @@ class ContainerRecoveryTests(unittest.TestCase):
             task_id = 'b' * 32
             task_dir = client.runtime_directory / task_id
             task_dir.mkdir()
-            with patch('hearth.agents.agent_container.agent_store.get_task', return_value=None), \
-                 patch('hearth.agents.agent_container.agent_store.get_runtime', return_value=None), \
+            with patch('llama_web.agents.agent_container.agent_store.get_task', return_value=None), \
+                 patch('llama_web.agents.agent_container.agent_store.get_runtime', return_value=None), \
                  patch.object(client, '_docker') as docker:
                 client.migrate_legacy_runtime()
             self.assertFalse(task_dir.exists())
-            docker.assert_called_once_with('rm', '--force', 'hearth-agent-' + task_id[:24], timeout=60)
+            docker.assert_called_once_with('rm', '--force', 'llama_web-agent-' + task_id[:24], timeout=60)
 
     def test_legacy_model_relay_metadata_uses_host_ca_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
             client = ContainerOpenCode(directory)
-            name = 'hearth-agent-'+'a'*24
+            name = 'llama_web-agent-'+'a'*24
             task_id = 'a'*32
-            from hearth.agents import agent_store
-            from hearth.storage import users_store
+            from llama_web.agents import agent_store
+            from llama_web.storage import users_store
             user = users_store.create_user('runtime-test-' + task_id, 'test-password', 'admin')
             self.addCleanup(users_store.delete_user, user['id'])
             agent_store.save_task({'id':task_id,'owner':user['id'],'updated_at':0})
@@ -357,7 +357,7 @@ class ContainerRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             client = ContainerOpenCode(directory)
             job = {'id':'a'*32, 'model': {'providerID': 'lmstudio', 'id': 'model'},
-                   'session_id':'hearth-agent-'+'a'*24+'::old-session'}
+                   'session_id':'llama_web-agent-'+'a'*24+'::old-session'}
             empty_skill_hash = hashlib.sha256(b'{}').hexdigest()
             runtime = {'tool_policy_version': 'native-tools-v2',
                        'model_proxy': {'skill_bundle_hash': empty_skill_hash,
@@ -372,7 +372,7 @@ class ContainerRecoveryTests(unittest.TestCase):
                  patch.object(client, '_skill_bundle', return_value={}), \
                  patch.object(client,'snapshot',side_effect=RuntimeError('The isolated agent container is missing.')) as snapshot, \
                  patch.object(client,'cleanup') as cleanup, \
-                 patch.object(client,'create',return_value='hearth-agent-'+'a'*24+'::new-session') as create, \
+                 patch.object(client,'create',return_value='llama_web-agent-'+'a'*24+'::new-session') as create, \
                  patch.object(client,'_report'):
                 result=client.resume(job)
             snapshot.assert_called_once_with(job['session_id'])

@@ -2,15 +2,15 @@
 import unittest
 import os
 import tempfile
-from hearth.storage import database
-from hearth.storage import browse_history_store
-from hearth.storage import chat_store
-from hearth.storage import metrics_store
-from hearth.storage import model_metadata_store
-from hearth.storage import quiz_store
-from hearth.storage import settings_store
-from hearth.storage import secret_store
-from hearth.storage import users_store
+from llama_web.storage import database
+from llama_web.storage import browse_history_store
+from llama_web.storage import chat_store
+from llama_web.storage import metrics_store
+from llama_web.storage import model_metadata_store
+from llama_web.storage import quiz_store
+from llama_web.storage import settings_store
+from llama_web.storage import secret_store
+from llama_web.storage import users_store
 
 
 class PostgreSQLStoreTests(unittest.TestCase):
@@ -20,13 +20,13 @@ class PostgreSQLStoreTests(unittest.TestCase):
         self.addCleanup(scope.__exit__, None, None, None)
 
     def test_temporary_schema_uses_private_agent_runtime_directory(self):
-        outer_runtime = os.environ['HEARTH_AGENT_RUNTIME_DIR']
+        outer_runtime = os.environ['LLAMA_WEB_AGENT_RUNTIME_DIR']
         with database.temporary_schema():
-            isolated_runtime = os.environ['HEARTH_AGENT_RUNTIME_DIR']
+            isolated_runtime = os.environ['LLAMA_WEB_AGENT_RUNTIME_DIR']
             self.assertNotEqual(isolated_runtime, outer_runtime)
             self.assertNotEqual(isolated_runtime, str(database.DATA_DIR / 'agent-runtime'))
             self.assertTrue(os.path.isdir(isolated_runtime))
-        self.assertEqual(os.environ['HEARTH_AGENT_RUNTIME_DIR'], outer_runtime)
+        self.assertEqual(os.environ['LLAMA_WEB_AGENT_RUNTIME_DIR'], outer_runtime)
         self.assertFalse(os.path.exists(isolated_runtime))
 
     def test_users_authenticate_and_unique_conflicts_rollback(self):
@@ -134,7 +134,7 @@ class PostgreSQLStoreTests(unittest.TestCase):
             env_file = Path(directory) / '.env'
             env_file.write_text('LMSTUDIO_BASE_URL=http://legacy.test:1234\nLMSTUDIO_API_KEY=legacy-secret\n')
             with patch.object(settings_store, 'ROOT', Path(directory)), patch.dict(os.environ, {
-                'HEARTH_SKIP_LEGACY_CONFIG_MIGRATION': '0',
+                'LLAMA_WEB_SKIP_LEGACY_CONFIG_MIGRATION': '0',
                 'LMSTUDIO_BASE_URL': 'http://legacy.test:1234',
                 'LMSTUDIO_API_KEY': 'legacy-secret',
             }, clear=False):

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from hearth.integrations import public_model_catalog as catalog
+from llama_web.integrations import public_model_catalog as catalog
 
 
 class PublicCatalogTests(unittest.TestCase):

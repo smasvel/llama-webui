@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hearth.core import npu_request_lock
+from llama_web.core import npu_request_lock
 
 
 class NPURequestLockTests(unittest.TestCase):

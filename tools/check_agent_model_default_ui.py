@@ -10,8 +10,8 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app
-from hearth.agents import agent_tasks
-from hearth.agents.agent_tasks import Manager
+from llama_web.agents import agent_tasks
+from llama_web.agents.agent_tasks import Manager
 from playwright.sync_api import expect, sync_playwright
 from werkzeug.serving import make_server
 
@@ -19,7 +19,7 @@ CURRENT = {'providerID': 'lmstudio', 'id': 'gemma4-coding-agent'}
 LOADED = {'providerID': 'lmstudio', 'id': 'qwen-coding-agent'}
 
 with contextlib.ExitStack() as stack:
-    directory = stack.enter_context(tempfile.TemporaryDirectory(prefix='hearth-agent-model-ui-'))
+    directory = stack.enter_context(tempfile.TemporaryDirectory(prefix='llama_web-agent-model-ui-'))
     fake = Mock()
     fake.models.return_value = [
         {**CURRENT, 'name': 'Gemma current assignment'},

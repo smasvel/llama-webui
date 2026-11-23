@@ -1,7 +1,7 @@
 """Deterministic OpenCode conversations. Tool results and user answers are fixtures.
 
 Nothing in this module executes generated commands or touches a target project.
-Schemas mirror the OpenCode requests captured by Hearth locally.
+Schemas mirror the OpenCode requests captured by llama_web locally.
 """
 import json
 

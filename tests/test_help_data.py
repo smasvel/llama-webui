@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from hearth.core import help_data
+from llama_web.core import help_data
 
 
 class TailscaleHelpTests(unittest.TestCase):

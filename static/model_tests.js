@@ -207,7 +207,7 @@
 
   const scenarioToggle = el("scenario-assistant-toggle");
   const scenarioPanel = el("scenario-assistant-panel");
-  const scenarioPanelStateKey = "hearth-model-test-scenario-assistant-open";
+  const scenarioPanelStateKey = "llama-web-model-test-scenario-assistant-open";
   let scenarioMessages = [], scenarioRows = [], editingScenarioId = null, scenarioAssistantBusy = false;
   function showScenarioPanel(show) {
     scenarioPanel.hidden = !show;
@@ -402,7 +402,7 @@
       await history(job?.id === deletedId ? undefined : job?.id);
     } catch (error) { el("tests-delete-status").textContent = error.message; }
   });
-  window.hearthModelTests = {start, reset, isRunning: () => running || starting};
+  window.llamaWebModelTests = {start, reset, isRunning: () => running || starting};
   Promise.all([history(), loadModels()]).then(async () => {
     const params = new URLSearchParams(window.location.search);
     const backend = params.get("backend"), modelId = params.get("model");

@@ -10,7 +10,7 @@ the individual test modules:
    directory on ``sys.path`` restores that convention.
 
 2. Keep standalone, manually-run live scripts (``run_*`` and ``verify_*``) out of
-   collection. They are not pytest tests: they hit the running Hearth API and exit
+   collection. They are not pytest tests: they hit the running llama_web API and exit
    with a non-zero status when a side is unreachable, which used to abort the whole
    suite with ``SystemExit``. They remain runnable directly with ``python tests/...``.
 """

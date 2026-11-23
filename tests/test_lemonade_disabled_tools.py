@@ -1,5 +1,5 @@
 import unittest
-from hearth.backends.lemonade_guard_shim import _normalize_tool_choice
+from llama_web.backends.lemonade_guard_shim import _normalize_tool_choice
 
 
 class DisabledToolsTests(unittest.TestCase):

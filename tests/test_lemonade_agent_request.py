@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from hearth.backends import lemonade_guard_shim as shim
+from llama_web.backends import lemonade_guard_shim as shim
 
 
 class AgentRequestTests(unittest.TestCase):
@@ -13,7 +13,7 @@ class AgentRequestTests(unittest.TestCase):
         self.assertNotEqual(compacted, content)
         self.assertTrue(compacted.startswith("start\n"))
         self.assertTrue(compacted.endswith("end\n"))
-        self.assertIn("Hearth compacted", compacted)
+        self.assertIn("llama_web compacted", compacted)
 
     def test_tool_request_sets_template_thinking_flag_without_mutating_input(self):
         body = {'tools': [{'type': 'function'}], 'messages': [{'role': 'user', 'content': 'Inspect project'}]}

@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from werkzeug.serving import make_server
 from playwright.sync_api import sync_playwright, expect
 import app
-from hearth.models import model_tests
-from hearth.models import model_test_profiles as profiles
+from llama_web.models import model_tests
+from llama_web.models import model_test_profiles as profiles
 
 TARGET = {'backend':'fastflowlm','id':'flm/test-fixture','state':'not-loaded','type':'llm'}
 with contextlib.ExitStack() as stack:
@@ -105,6 +105,6 @@ with contextlib.ExitStack() as stack:
   page.locator('#tests-cancel').click()
   expect(page.locator('#tests-status')).to_contain_text('cancelled',timeout=10000)
   assert not errors,errors
-  page.screenshot(path='/tmp/hearth-model-tests-ui.png',full_page=True)
+  page.screenshot(path='/tmp/llama_web-model-tests-ui.png',full_page=True)
   browser.close()
   print('PASS browser start, live progress, repair, escaping, report download, reload recovery, reset and cancellation')

@@ -1,1 +1,0 @@
-"""Hearth application packages."""

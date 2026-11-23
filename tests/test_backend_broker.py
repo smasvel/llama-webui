@@ -28,12 +28,12 @@ class BackendBrokerTests(unittest.TestCase):
 
     def _client_env(self, token):
         return {
-            "HEARTH_BACKEND_BROKER_URL": self.url,
-            "HEARTH_BACKEND_BROKER_TOKEN": token,
+            "LLAMA_WEB_BACKEND_BROKER_URL": self.url,
+            "LLAMA_WEB_BACKEND_BROKER_TOKEN": token,
         }
 
     def test_rejects_unknown_service_and_verb(self):
-        with patch.dict(os.environ, {"HEARTH_BACKEND_BROKER_TOKEN": "token"}):
+        with patch.dict(os.environ, {"LLAMA_WEB_BACKEND_BROKER_TOKEN": "token"}):
             for body in (
                 {"args": ["restart"], "service": "unheard.service"},
                 {"args": ["kill"], "service": "vllm.service"},
@@ -62,14 +62,14 @@ class BackendBrokerTests(unittest.TestCase):
         self.assertIn("invalid broker token", inspect.getsource(self.broker))
 
     def test_rejects_wrong_verb_and_unknown_service(self):
-        with patch.dict(os.environ, {"HEARTH_BACKEND_BROKER_TOKEN": "token"}):
+        with patch.dict(os.environ, {"LLAMA_WEB_BACKEND_BROKER_TOKEN": "token"}):
             with self.assertRaises(self.broker.BrokerError):
                 self.broker.run_systemctl(["kill"], "vllm.service")
             with self.assertRaises(self.broker.BrokerError):
-                self.broker.run_systemctl(["restart"], "not-a-hearth.service")
+                self.broker.run_systemctl(["restart"], "not-a-llama_web.service")
 
     def test_rejects_unsupported_flm_verb(self):
-        with patch.dict(os.environ, {"HEARTH_BACKEND_BROKER_TOKEN": "token"}):
+        with patch.dict(os.environ, {"LLAMA_WEB_BACKEND_BROKER_TOKEN": "token"}):
             with self.assertRaises(self.broker.BrokerError):
                 self.broker.run_flm(["serve", "qwen3:0.6b"])
             with self.assertRaises(self.broker.BrokerError):
@@ -78,8 +78,8 @@ class BackendBrokerTests(unittest.TestCase):
     def test_flm_version_is_allowed_when_binary_is_configured(self):
         # Dot `flm --version` is read-only; the broker refuses to start serving.
         with patch.dict(os.environ, {
-            "HEARTH_BACKEND_BROKER_TOKEN": "token",
-            "HEARTH_BACKEND_BROKER_FLM_BIN": "/bin/true",
+            "LLAMA_WEB_BACKEND_BROKER_TOKEN": "token",
+            "LLAMA_WEB_BACKEND_BROKER_FLM_BIN": "/bin/true",
         }):
             result = self.broker.run_flm(["--version"])
             self.assertEqual(result["returncode"], 0)
@@ -90,7 +90,7 @@ class BackendBrokerTests(unittest.TestCase):
 class BackendBrokerClientTests(unittest.TestCase):
     def setUp(self):
         import importlib
-        self.client = importlib.import_module("hearth.backends.backend_broker_client")
+        self.client = importlib.import_module("llama_web.backends.backend_broker_client")
 
     def test_no_broker_configured_returns_none(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -106,8 +106,8 @@ class BackendBrokerClientTests(unittest.TestCase):
 
     def _client_env(self, token):
         return {
-            "HEARTH_BACKEND_BROKER_URL": "http://127.0.0.1:8765",
-            "HEARTH_BACKEND_BROKER_TOKEN": token,
+            "LLAMA_WEB_BACKEND_BROKER_URL": "http://127.0.0.1:8765",
+            "LLAMA_WEB_BACKEND_BROKER_TOKEN": token,
         }
 
     def test_broker_error_surfaces_message(self):

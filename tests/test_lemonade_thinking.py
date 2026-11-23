@@ -2,9 +2,9 @@ import copy
 import unittest
 from unittest.mock import patch
 
-from hearth.backends import lemonade_client
-from hearth.backends import lemonade_guard_shim as shim
-from hearth.backends import lemonade_thinking
+from llama_web.backends import lemonade_client
+from llama_web.backends import lemonade_guard_shim as shim
+from llama_web.backends import lemonade_thinking
 
 
 MODEL = 'Ornith-1.5-35B-A3B-GGUF'

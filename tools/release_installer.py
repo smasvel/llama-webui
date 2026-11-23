@@ -1,6 +1,6 @@
 """Interactive installer used by the Windows, macOS, and Linux release bundles.
 
-It installs Hearth and its database, then saves the selected inference endpoint.
+It installs llama_web and its database, then saves the selected inference endpoint.
 Optional local runtime installation is available; model weights are separate downloads.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ BACKENDS = {
 def choose_backend(system=None, input_fn=input):
     system = system or platform.system()
     options = [(key, *value[:2]) for key, value in BACKENDS.items() if system in value[2]]
-    print("Choose the backend Hearth should connect to:")
+    print("Choose the backend llama_web should connect to:")
     for index, (key, label, url) in enumerate(options, 1):
         print(f"  {index}. {label} ({url})")
     while True:
@@ -65,7 +65,7 @@ def install(args=None):
     if system not in {"Windows", "Darwin", "Linux"}:
         parser.error(f"Unsupported operating system: {system}")
     if sys.version_info < (3, 12):
-        raise SystemExit("Hearth needs Python 3.12 or newer. Install Python, then run this installer again.")
+        raise SystemExit("llama_web needs Python 3.12 or newer. Install Python, then run this installer again.")
     if not shutil.which("docker"):
         raise SystemExit("Docker is required. Install Docker Desktop or Docker Engine, start it, and retry.")
     _run(["docker", "info"], cwd=ROOT)
@@ -83,7 +83,7 @@ def install(args=None):
         backend_url = backend_url or supported[1]
 
     venv_python = ROOT / (".venv/Scripts/python.exe" if system == "Windows" else ".venv/bin/python")
-    if os.environ.get("HEARTH_RELEASE_INSTALL_IN_VENV") != "1":
+    if os.environ.get("LLAMA_WEB_RELEASE_INSTALL_IN_VENV") != "1":
         if not venv_python.exists():
             _run([sys.executable, "-m", "venv", ".venv"])
         _run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"])
@@ -95,7 +95,7 @@ def install(args=None):
                 browser_command.append("--with-deps")
             _run(browser_command + ["chromium"])
         child_env = os.environ.copy()
-        child_env["HEARTH_RELEASE_INSTALL_IN_VENV"] = "1"
+        child_env["LLAMA_WEB_RELEASE_INSTALL_IN_VENV"] = "1"
         forwarded = list(sys.argv[1:] if args is None else args)
         # Forward the resolved choice so the child never asks twice.
         forwarded = [arg for arg in forwarded if arg != "--skip-backend-install"]
@@ -127,10 +127,10 @@ def install(args=None):
         compose += ["--project-name", options.project_name]
     _run(compose + ["up", "-d", "--wait", "postgres"])
     setup.initialize_application_storage()
-    from hearth.core.local_tls import ensure_certificate
+    from llama_web.core.local_tls import ensure_certificate
     ensure_certificate(ROOT / 'certs')
 
-    from hearth.storage import settings_store
+    from llama_web.storage import settings_store
     settings_store.set(f"{backend}_base_url", backend_url)
     if not options.no_api_key:
         try:
@@ -139,9 +139,9 @@ def install(args=None):
             secret = ""
         if secret:
             settings_store.set(f"{backend}_api_key", secret)
-    print(f"\nHearth is installed and configured for {BACKENDS[backend][0]} at {backend_url}.")
-    print("Download a model in Hearth before chatting. Runtimes not selected for installation must be installed separately.")
-    print("Start Hearth with deploy/start-hearth.ps1 on Windows, or bash deploy/start-hearth.sh on macOS/Linux.")
+    print(f"\nllama_web is installed and configured for {BACKENDS[backend][0]} at {backend_url}.")
+    print("Download a model in llama_web before chatting. Runtimes not selected for installation must be installed separately.")
+    print("Start llama_web with deploy/start-llama_web.ps1 on Windows, or bash deploy/start-llama_web.sh on macOS/Linux.")
     print("Then open https://localhost:5443 and create the administrator account on first use.")
 
 

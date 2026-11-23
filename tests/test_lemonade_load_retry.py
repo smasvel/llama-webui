@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import requests
 
-from hearth.backends import lemonade_client
+from llama_web.backends import lemonade_client
 
 
 class LoadModelRetryTests(unittest.TestCase):

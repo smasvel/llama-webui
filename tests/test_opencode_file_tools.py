@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from hearth.backends import flm_tool_shim as shim
+from llama_web.backends import flm_tool_shim as shim
 
 
 def tool(name, properties):
@@ -57,7 +57,7 @@ class OpenCodeFileToolTests(unittest.TestCase):
             "model": "flm/minicpm-v-4.7:1b", "stream": streamed, "tools": tools,
             "messages": [{"role": "user", "content": "Read the project and fix the implementation."}],
             **(extra or {}),
-        }, headers={"X-Hearth-Client": "opencode"})
+        }, headers={"X-llama_web-Client": "opencode"})
         self.assertEqual(response.status_code, 200)
         return response
 

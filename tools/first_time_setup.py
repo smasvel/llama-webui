@@ -1,4 +1,4 @@
-"""Initialize a new Hearth installation without overwriting existing data or secrets."""
+"""Initialize a new llama_web installation without overwriting existing data or secrets."""
 import argparse
 import getpass
 import math
@@ -24,7 +24,7 @@ def install_agent_runtime(rebuild=False):
     version = version_path.read_text().strip()
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
         raise RuntimeError('Agent runtime image version is invalid.')
-    image = 'hearth-agent-opencode:' + version
+    image = 'llama_web-agent-opencode:' + version
     opencode_version = (ROOT / 'agent_container' / 'OPENCODE_VERSION').read_text().strip()
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', opencode_version):
         raise RuntimeError('OpenCode runtime version is invalid.')
@@ -55,13 +55,13 @@ def prepare_environment(port):
         raise RuntimeError('An existing DATABASE_URL has no matching .env.postgres. Restore that configuration; setup will not replace it.')
     if not postgres_path.exists():
         password = secrets.token_hex(32)
-        write_private(postgres_path, f'POSTGRES_DB=hearth\nPOSTGRES_USER=hearth\nPOSTGRES_PASSWORD={password}\nPOSTGRES_PORT={port}\nDATABASE_URL=postgresql://hearth:{password}@127.0.0.1:{port}/hearth\n')
+        write_private(postgres_path, f'POSTGRES_DB=llama_web\nPOSTGRES_USER=llama_web\nPOSTGRES_PASSWORD={password}\nPOSTGRES_PORT={port}\nDATABASE_URL=postgresql://llama_web:{password}@127.0.0.1:{port}/llama_web\n')
     postgres = dotenv_values(postgres_path)
     if not postgres.get('DATABASE_URL') or not postgres.get('POSTGRES_PASSWORD'):
         raise RuntimeError('.env.postgres is incomplete; restore its database URL and password.')
     database_url = str(postgres['DATABASE_URL']).strip().lower()
     if not database_url.startswith(('postgresql://', 'postgres://')):
-        raise RuntimeError('.env.postgres must select PostgreSQL; Hearth does not support SQLite as its application database.')
+        raise RuntimeError('.env.postgres must select PostgreSQL; llama_web does not support SQLite as its application database.')
     if values.get('DATABASE_URL') and values['DATABASE_URL'] != postgres['DATABASE_URL']:
         raise RuntimeError('.env and .env.postgres select different databases. Setup will not switch an existing installation.')
     if not env_path.exists():
@@ -96,13 +96,13 @@ def has_sqlite_data():
 
 def initialize_application_storage():
     """Apply the canonical PostgreSQL DDL and private application migrations."""
-    from hearth.storage import database
-    from hearth.agents import agent_store
-    from hearth.storage import model_metadata_store
-    from hearth.storage import model_resource_warnings
-    from hearth.storage import secret_store
-    from hearth.storage import settings_store
-    from hearth.storage import users_store
+    from llama_web.storage import database
+    from llama_web.agents import agent_store
+    from llama_web.storage import model_metadata_store
+    from llama_web.storage import model_resource_warnings
+    from llama_web.storage import secret_store
+    from llama_web.storage import settings_store
+    from llama_web.storage import users_store
 
     database.init_schema()
     users_store.init_db()
@@ -136,7 +136,7 @@ def service_text(root):
     def quote(value):
         return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
     return f'''[Unit]
-Description=Hearth local AI web UI
+Description=llama_web local AI web UI
 After=network.target
 
 [Service]
@@ -168,7 +168,7 @@ def install_service():
 
 def offer_initial_model_download(input_fn=input):
     """Offer a catalog model before the app service starts, with local resource checks."""
-    from hearth.backends import lemonade_client as lemonade
+    from llama_web.backends import lemonade_client as lemonade
 
     model_id = 'Ornith-1.5-9B-GGUF'
     try:
@@ -204,7 +204,7 @@ def offer_initial_model_download(input_fn=input):
         print('Skipping download: available RAM is below model size plus 1 GiB headroom.')
         return False
     try:
-        answer = input_fn('Download this model before Hearth starts? [y/N]: ').strip().lower()
+        answer = input_fn('Download this model before llama_web starts? [y/N]: ').strip().lower()
     except EOFError:
         answer = ''
     if answer not in ('y', 'yes'):
@@ -218,7 +218,7 @@ def offer_initial_model_download(input_fn=input):
             print(f"  {progress.get('file') or model_id}: {progress['percent']}%", flush=True)
     else:
         raise RuntimeError(f'Lemonade did not confirm completion of {model_id}.')
-    from hearth.storage import model_metadata_store
+    from llama_web.storage import model_metadata_store
     model_metadata_store.mark_model_downloaded('lemonade', model_id)
     print(f'Downloaded {model_id}. Load it from Models after signing in.')
     return True
@@ -229,9 +229,9 @@ REQUIRED_MEDIA_MODELS = ('Whisper-Small', 'kokoro-v1', 'Anima-Turbo')
 
 def download_required_media_models():
     """Install all supported audio/image/video assets before completing setup."""
-    from hearth.backends import lemonade_client as lemonade
-    from hearth.backends import video_generation
-    from hearth.storage import model_metadata_store
+    from llama_web.backends import lemonade_client as lemonade
+    from llama_web.backends import video_generation
+    from llama_web.storage import model_metadata_store
 
     try:
         lemonade.search_catalog(REQUIRED_MEDIA_MODELS[0])
@@ -315,7 +315,7 @@ def main():
     if os.name != 'nt' and os.geteuid() == 0:
         parser.error('Run as your regular user, not sudo; use the host dependency installer for privileged packages.')
     if not args.no_service and not Path('/run/systemd/system').is_dir():
-        parser.error('systemd is not running. Use --no-service and start Hearth manually.')
+        parser.error('systemd is not running. Use --no-service and start llama_web manually.')
     if not shutil.which('docker'):
         raise RuntimeError('Run deploy/install-first-time.sh to install missing host dependencies first.')
     subprocess.run(['docker', 'info'], check=True, stdout=subprocess.DEVNULL)
@@ -335,7 +335,7 @@ def main():
         compose += ['--project-name', args.project_name]
     subprocess.run(compose + ['up', '-d', '--wait', 'postgres'], check=True, cwd=ROOT)
     user_count = initialize_application_storage()
-    from hearth.core.local_tls import ensure_certificate
+    from llama_web.core.local_tls import ensure_certificate
     ensure_certificate(ROOT / 'certs')
     download_required_media_models()
     if not args.skip_model_download:
@@ -351,7 +351,7 @@ def main():
         install_service()
     print('Setup complete. Open https://localhost:5443 and create the administrator account.'
           if not args.no_service else
-          'Database ready. Start Hearth with .venv/bin/python app.py, then open it to create the administrator account.')
+          'Database ready. Start llama_web with .venv/bin/python app.py, then open it to create the administrator account.')
 
 
 if __name__ == '__main__':

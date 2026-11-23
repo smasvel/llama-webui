@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import requests
 import urllib3
 import app
-from hearth.backends import lemonade_client
+from llama_web.backends import lemonade_client
 
 urllib3.disable_warnings()
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +44,7 @@ def api(client, path, body=None):
 
 
 def probe_media(data, suffix, still=False):
-    with tempfile.TemporaryDirectory(prefix='hearth-support-probe-') as directory:
+    with tempfile.TemporaryDirectory(prefix='llama_web-support-probe-') as directory:
         path = Path(directory) / ('sample' + suffix)
         path.write_bytes(data)
         probe = subprocess.run(['ffprobe', '-v', 'error', '-show_streams', '-show_format',
@@ -91,7 +91,7 @@ def run(after_job, output):
                 backend = app.lms if model['backend'] == 'lmstudio' else lemonade_client
                 response = requests.post(backend.base_url() + '/v1/embeddings',
                     headers=backend._auth_headers(), json={'model': model['id'],
-                    'input': ['Hearth model validation', 'Hearth model validation']}, timeout=120)
+                    'input': ['llama_web model validation', 'llama_web model validation']}, timeout=120)
                 response.raise_for_status()
                 vectors = [x['embedding'] for x in sorted(response.json()['data'], key=lambda x: x['index'])]
                 assert len(vectors) == 2 and len(vectors[0]) > 0 and len(vectors[0]) == len(vectors[1])
@@ -100,7 +100,7 @@ def run(after_job, output):
                 assert norm > 0 and max(abs(a-b) for a,b in zip(*vectors)) < 0.001
                 result['dimensions'] = len(vectors[0])
             elif model['type'] == 'tts':
-                spoken = lemonade_client.synthesize_speech('Hearth model validation is complete.')
+                spoken = lemonade_client.synthesize_speech('llama_web model validation is complete.')
                 info = probe_media(spoken, '.mp3')
                 assert info['streams'][0]['codec_type'] == 'audio'
                 result['audio_bytes'] = len(spoken)
@@ -122,7 +122,7 @@ def run(after_job, output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--after-job')
-    parser.add_argument('--output', default='/tmp/hearth-support-model-tests.json')
+    parser.add_argument('--output', default='/tmp/llama_web-support-model-tests.json')
     args = parser.parse_args()
     results = run(args.after_job, args.output)
     raise SystemExit(0 if all(r['passed'] for r in results) else 1)

@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from hearth.backends import kobold_tool_shim as shim
+from llama_web.backends import kobold_tool_shim as shim
 
 
 class KoboldToolCompatibilityTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class KoboldToolCompatibilityTests(unittest.TestCase):
             ("get_weather", {"city": "Boston"}), ("get_weather", {"city": "Paris"}),
         ])
         self.assertEqual(calls[0]["id"], "kobold-call")
-        self.assertTrue(calls[1]["id"].startswith("call_hearth_"))
+        self.assertTrue(calls[1]["id"].startswith("call_llama_web_"))
 
     def test_parallel_recovery_requires_one_explicit_required_string_field(self):
         body = self.parallel_body()
@@ -92,8 +92,8 @@ class KoboldToolCompatibilityTests(unittest.TestCase):
         upstream.iter_lines.return_value = [b'data: {"choices":[{"delta":{"content":"ok"}}]}',
                                             b'data: [DONE]']
         body = {"stream": True, "messages": [{"role": "user", "content": "Reply ok."}]}
-        with patch('hearth.backends.kobold_tool_shim.live_report.start', return_value=7), \
-                patch('hearth.backends.kobold_tool_shim.live_report.finish'), \
+        with patch('llama_web.backends.kobold_tool_shim.live_report.start', return_value=7), \
+                patch('llama_web.backends.kobold_tool_shim.live_report.finish'), \
                 patch.object(shim, "_upstream_url", return_value="http://kobold"), \
                 patch.object(shim, "_headers", return_value={}), \
                 patch.object(shim.requests, "post", return_value=upstream):

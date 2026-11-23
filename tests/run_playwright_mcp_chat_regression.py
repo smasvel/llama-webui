@@ -1,11 +1,11 @@
-"""Live Playwright MCP regression through Hearth chat and the user's active model.
+"""Live Playwright MCP regression through llama_web chat and the user's active model.
 
-Run against a running Hearth instance with an active chat model selected for the
+Run against a running llama_web instance with an active chat model selected for the
 configured user:
 
     .venv/bin/python tests/run_playwright_mcp_chat_regression.py
 
-This is intentionally an end-to-end check: it uses Hearth's live HTTP chat route,
+This is intentionally an end-to-end check: it uses llama_web's live HTTP chat route,
 the user's saved active model, and the running Playwright MCP. It does not mock the
 model, browser, web search, or MCP client.
 """
@@ -26,25 +26,25 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import app as hearth_app  # noqa: E402
-from hearth.core.session_cookie import session_cookie_name  # noqa: E402
-from hearth.storage import browse_history_store, users_store  # noqa: E402
+import app as llama_web_app  # noqa: E402
+from llama_web.core.session_cookie import session_cookie_name  # noqa: E402
+from llama_web.storage import browse_history_store, users_store  # noqa: E402
 
 
-BASE_URL = os.environ.get("HEARTH_TEST_BASE_URL", "https://127.0.0.1:5443").rstrip("/")
+BASE_URL = os.environ.get("LLAMA_WEB_TEST_BASE_URL", "https://127.0.0.1:5443").rstrip("/")
 SALON_NAME = "Market Square"
 SALON_ADDRESS = "620 Jefferson Rd, Rochester, NY 14623"
 SALON_URL = "https://salons.greatclips.com/us/ny/rochester/620-jefferson-rd"
-TIMEOUT_SECONDS = max(60, int(os.environ.get("HEARTH_PLAYWRIGHT_TEST_TIMEOUT", "240")))
+TIMEOUT_SECONDS = max(60, int(os.environ.get("LLAMA_WEB_PLAYWRIGHT_TEST_TIMEOUT", "240")))
 
 
 def _test_user() -> dict:
     users = users_store.list_users(page=1, per_page=100).get("users", [])
-    wanted = os.environ.get("HEARTH_PLAYWRIGHT_TEST_USER", "admin")
+    wanted = os.environ.get("LLAMA_WEB_PLAYWRIGHT_TEST_USER", "admin")
     user = next((row for row in users if row.get("username") == wanted), None)
     if user is None:
         raise RuntimeError(
-            f"Hearth user {wanted!r} was not found. Set HEARTH_PLAYWRIGHT_TEST_USER "
+            f"llama_web user {wanted!r} was not found. Set LLAMA_WEB_PLAYWRIGHT_TEST_USER "
             "to an existing account with an active chat model."
         )
     return user
@@ -61,15 +61,15 @@ def _authenticated_session(user: dict) -> tuple[requests.Session, str]:
         "last_activity": time.time(),
         "login_csrf_token": csrf,
     }
-    serializer = hearth_app.app.session_interface.get_signing_serializer(hearth_app.app)
+    serializer = llama_web_app.app.session_interface.get_signing_serializer(llama_web_app.app)
     if serializer is None:
-        raise RuntimeError("Hearth's Flask session signer is unavailable")
+        raise RuntimeError("llama_web's Flask session signer is unavailable")
     cookie_value = serializer.dumps(session_data)
     parsed = urlparse(BASE_URL)
     client = requests.Session()
-    client.verify = os.environ.get("HEARTH_TEST_CA_BUNDLE") or False
+    client.verify = os.environ.get("LLAMA_WEB_TEST_CA_BUNDLE") or False
     client.cookies.set(
-        session_cookie_name(hearth_app.APP_PORT), cookie_value,
+        session_cookie_name(llama_web_app.APP_PORT), cookie_value,
         domain=parsed.hostname, path="/", secure=parsed.scheme == "https",
     )
     client.headers.update({"X-CSRF-Token": csrf})
@@ -80,7 +80,7 @@ def _active_chat_model(client: requests.Session, user: dict) -> tuple[str, str]:
     model_id = users_store.get_chat_model(user["id"])
     if not model_id:
         raise RuntimeError(
-            f"User {user['username']!r} has no saved active chat model. Select one in Hearth Chat first."
+            f"User {user['username']!r} has no saved active chat model. Select one in llama_web Chat first."
         )
     response = client.get(f"{BASE_URL}/api/models", timeout=30)
     response.raise_for_status()
@@ -88,7 +88,7 @@ def _active_chat_model(client: requests.Session, user: dict) -> tuple[str, str]:
     match = next((item for item in models if item.get("id") == model_id), None)
     if not match or match.get("state") != "loaded" or match.get("type") != "llm":
         raise RuntimeError(
-            f"The user's active chat model {model_id!r} is not currently loaded in Hearth. "
+            f"The user's active chat model {model_id!r} is not currently loaded in llama_web. "
             "The regression runner will not load or switch models."
         )
     return model_id, str(match.get("backend") or "unknown")
@@ -112,14 +112,14 @@ def run() -> None:
     client, _csrf = _authenticated_session(user)
     conversation_id = str(uuid.uuid4())
     model_id, backend = _active_chat_model(client, user)
-    print(f"Hearth user: {user['username']}")
+    print(f"llama_web user: {user['username']}")
     print(f"Active model: {model_id} (backend={backend})")
 
     # This official Rochester, NY salon has a live estimated-wait display. The test
     # checks for a readable wait/result, never submits a check-in, and does not depend
     # on the estimate remaining the same between runs.
     prompt = (
-        f"Please use Hearth's Playwright MCP to check the current estimated wait time "
+        f"Please use llama_web's Playwright MCP to check the current estimated wait time "
         f"at Great Clips {SALON_NAME}, {SALON_ADDRESS}. Open the official salon page: "
         f"{SALON_URL}. Do not check in or submit any form. Reply with the salon name, "
         "the wait in minutes (or say if no live estimate is shown/it is closed), and "
@@ -137,10 +137,10 @@ def run() -> None:
     )
     if response.status_code != 202:
         raise RuntimeError(
-            f"Hearth rejected the live chat request ({response.status_code}): "
+            f"llama_web rejected the live chat request ({response.status_code}): "
             f"{response.text[:1000]}"
         )
-    print("Submitted through Hearth /api/chat/start; waiting for the active model and MCP…", flush=True)
+    print("Submitted through llama_web /api/chat/start; waiting for the active model and MCP…", flush=True)
 
     deadline = time.monotonic() + TIMEOUT_SECONDS
     reply = ""
@@ -152,23 +152,23 @@ def run() -> None:
         time.sleep(1)
     if status == "running" or not reply:
         raise RuntimeError(
-            f"Hearth chat did not finish within {TIMEOUT_SECONDS}s (status={status}). "
+            f"llama_web chat did not finish within {TIMEOUT_SECONDS}s (status={status}). "
             f"Conversation {conversation_id} is retained for diagnosis."
         )
     if status != "completed":
         raise RuntimeError(
-            f"Hearth chat finished with status={status}. Conversation {conversation_id} "
+            f"llama_web chat finished with status={status}. Conversation {conversation_id} "
             "is retained for diagnosis.\n" + reply[-3000:]
         )
 
     plain_reply = re.sub(r"(?m)^\s*🔧 \*Calling `[^`]+`\.\.\.\*\s*$", "", reply).strip()
     tool_calls = re.findall(r"Calling `(playwright__browser_[^`]+)`", reply)
     print(f"Playwright MCP calls: {', '.join(tool_calls) if tool_calls else 'none'}")
-    print("Hearth assistant reply:")
+    print("llama_web assistant reply:")
     print(plain_reply)
 
     if not tool_calls:
-        raise AssertionError("Hearth returned no visible Playwright MCP browser-tool call")
+        raise AssertionError("llama_web returned no visible Playwright MCP browser-tool call")
     if not plain_reply:
         raise AssertionError("The active model returned only tool-call markers, no answer")
     if not re.search(r"market\s+square|great\s+clips", plain_reply, re.I):
@@ -184,7 +184,7 @@ def run() -> None:
         ).fetchall()
     if not visits:
         raise AssertionError(
-            "The answer mentioned browser research, but Hearth recorded no Playwright MCP "
+            "The answer mentioned browser research, but llama_web recorded no Playwright MCP "
             "visit to the New York salon page."
         )
     print("Verified user-scoped Playwright MCP history for the official Rochester salon page.")

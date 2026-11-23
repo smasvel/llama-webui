@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock, MagicMock, patch
 
-from hearth.backends import flm_tool_shim as shim
+from llama_web.backends import flm_tool_shim as shim
 from tools.test_flm_model import decode
 from tools.opencode_scenarios import TOOLS
 
@@ -27,7 +27,7 @@ class ParserRecoveryTests(unittest.TestCase):
             wire, _ = shim._recover_native_tool_parser({'tools': TOOLS}, {})
         calls, text, finishes, _ = decode(Mock(content=wire), True)
         self.assertEqual(calls, [])
-        self.assertIn('Hearth blocked', text)
+        self.assertIn('llama_web blocked', text)
         self.assertEqual(finishes, ['stop'])
 
     def test_never_recovers_after_any_call_or_ordinary_error_text(self):

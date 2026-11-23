@@ -1,0 +1,31 @@
+  <div id="code-modal-overlay" class="code-modal-overlay hidden">
+    <div class="code-modal">
+      <div class="code-modal-header">
+        <h3>Insert code block</h3>
+        <select id="code-modal-lang">
+          <option value="">plain text</option>
+          <option value="python">python</option>
+          <option value="javascript">javascript</option>
+          <option value="typescript">typescript</option>
+          <option value="bash">bash</option>
+          <option value="json">json</option>
+          <option value="yaml">yaml</option>
+          <option value="html">html</option>
+          <option value="css">css</option>
+          <option value="sql">sql</option>
+          <option value="go">go</option>
+          <option value="rust">rust</option>
+          <option value="java">java</option>
+          <option value="c">c</option>
+          <option value="cpp">cpp</option>
+        </select>
+        <button type="button" id="code-modal-close" class="code-modal-close" aria-label="Close">&times;</button>
+      </div>
+      <textarea id="code-modal-textarea" placeholder="Paste your code here&hellip;" spellcheck="false"></textarea>
+      <div class="code-modal-footer">
+        <button type="button" id="code-modal-cancel" class="composer-icon-btn">Cancel</button>
+        <button type="button" id="code-modal-insert" class="composer-icon-btn active">Insert into message</button>
+      </div>
+    </div>
+  </div>
+

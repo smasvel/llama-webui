@@ -1,14 +1,14 @@
-"""Broad Playwright smoke test for Hearth pages/tabs."""
+"""Broad Playwright smoke test for llama_web pages/tabs."""
 
 import os
 from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("HEARTH_URL", "https://localhost:5443")
+BASE_URL = os.environ.get("LLAMA_WEB_URL", "https://localhost:5443")
 
 
 def creds():
-    user = os.environ.get("HEARTH_USER")
-    pw = os.environ.get("HEARTH_PASSWORD")
+    user = os.environ.get("LLAMA_WEB_USER")
+    pw = os.environ.get("LLAMA_WEB_PASSWORD")
     if not pw:
         p = os.path.join(os.path.dirname(__file__), "..", "test-user")
         if os.path.isfile(p):
@@ -21,7 +21,7 @@ def creds():
 def main():
     user, pw = creds()
     if not user or not pw:
-        raise SystemExit("Set HEARTH_USER and HEARTH_PASSWORD or provide test-user.")
+        raise SystemExit("Set LLAMA_WEB_USER and LLAMA_WEB_PASSWORD or provide test-user.")
     errors = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)

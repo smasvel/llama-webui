@@ -4,9 +4,9 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from hearth.backends import fastflowlm_client as flm
-from hearth.backends import flm_tool_shim as shim
-from hearth.backends.flm_tool_shim import _split_live_reasoning
+from llama_web.backends import fastflowlm_client as flm
+from llama_web.backends import flm_tool_shim as shim
+from llama_web.backends.flm_tool_shim import _split_live_reasoning
 
 
 class ReasoningStreamingTests(unittest.TestCase):
@@ -15,7 +15,7 @@ class ReasoningStreamingTests(unittest.TestCase):
         paused.start()
         self.addCleanup(paused.stop)
 
-    def test_hearth_receives_first_content_before_upstream_finishes(self):
+    def test_llama_web_receives_first_content_before_upstream_finishes(self):
         advanced = []
         def lines(**kwargs):
             yield b'data: ' + json.dumps({'choices': [{'delta': {'content': 'First'}}]}).encode()
@@ -32,7 +32,7 @@ class ReasoningStreamingTests(unittest.TestCase):
             response = shim.app.test_client().post('/v1/chat/completions', json={
                 'model': 'qwen3.8-mtp:27b', 'messages': [], 'stream': True,
                 'tools': [{'type': 'function'}],
-            }, headers={'X-Hearth-Client': 'webui-chat'}, buffered=False)
+            }, headers={'X-llama_web-Client': 'webui-chat'}, buffered=False)
             try:
                 first = next(iter(response.response))
                 self.assertIn(b'First', first)
@@ -86,7 +86,7 @@ class ReasoningStreamingTests(unittest.TestCase):
 
     @patch.object(flm, '_write_active')
     @patch.object(flm.requests, 'post')
-    def test_hearth_enables_thinking_and_reads_incrementally(self, post, _write):
+    def test_llama_web_enables_thinking_and_reads_incrementally(self, post, _write):
         response = Mock(status_code=200)
         response.iter_lines.return_value = [
             b'data: {"choices":[{"delta":{"reasoning_content":"Checking"}}]}',

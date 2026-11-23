@@ -1,12 +1,12 @@
 """Trace persistence must commit writes and release database connections."""
 from pathlib import Path
-from hearth.storage import database
+from llama_web.storage import database
 import tempfile
 import time
 import unittest
 from unittest.mock import patch
 
-from hearth.core import live_requests
+from llama_web.core import live_requests
 
 
 class TraceStorageTests(unittest.TestCase):

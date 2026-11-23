@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from hearth.agents.agent_container import ContainerOpenCode, _ModelProxy
+from llama_web.agents.agent_container import ContainerOpenCode, _ModelProxy
 
 
 class AgentContainerTests(unittest.TestCase):
@@ -20,15 +20,15 @@ class AgentContainerTests(unittest.TestCase):
     def test_lowercase_docker_missing_object_is_reported_as_missing_container(self):
         with patch.object(self.client, '_make_proxy'), patch.object(
             self.client, '_docker', side_effect=RuntimeError(
-                'Docker agent runtime failed: error: no such object: hearth-agent-fixture')):
+                'Docker agent runtime failed: error: no such object: llama_web-agent-fixture')):
             with self.assertRaisesRegex(RuntimeError, 'isolated agent container is missing'):
-                self.client._endpoint('hearth-agent-fixture', {'model_proxy': {}})
+                self.client._endpoint('llama_web-agent-fixture', {'model_proxy': {}})
 
     def test_other_docker_inspect_errors_are_preserved(self):
         with patch.object(self.client, '_make_proxy'), patch.object(
             self.client, '_docker', side_effect=RuntimeError('Docker daemon is unavailable')):
             with self.assertRaisesRegex(RuntimeError, 'Docker daemon is unavailable'):
-                self.client._endpoint('hearth-agent-fixture', {'model_proxy': {}})
+                self.client._endpoint('llama_web-agent-fixture', {'model_proxy': {}})
 
     def test_new_container_uses_assignment_thinking_choice(self):
         job = {'id': 'c'*32, 'owner': 'fixture', 'title': 'Check', 'enable_thinking': False,
@@ -37,12 +37,12 @@ class AgentContainerTests(unittest.TestCase):
         proxy = Mock(info={'socket_path': '/fixture/model.sock'})
         with patch.object(self.client, '_ensure_image'), \
              patch.object(self.client, '_host_provider', return_value=({'enable_thinking': True}, provider, {'token': 'test-token'})), \
-             patch('hearth.agents.agent_container.agent_store.get_runtime', return_value=None), \
+             patch('llama_web.agents.agent_container.agent_store.get_runtime', return_value=None), \
              patch.object(self.client, '_make_proxy', return_value=proxy), \
              patch.object(self.client, '_write_runtime'), \
              patch.object(self.client, '_start_container',
                           side_effect=lambda name, info, *args: info.update(port=4096)) as start, \
-             patch('hearth.agents.agent_container._EndpointOpenCode') as endpoint, \
+             patch('llama_web.agents.agent_container._EndpointOpenCode') as endpoint, \
              patch.object(self.client, '_sync_to_container'):
             endpoint.return_value.call.return_value = {'data': {'id': 'new-session'}}
             self.client.create(job)
@@ -57,9 +57,9 @@ class AgentContainerTests(unittest.TestCase):
         info = {'task_id': 'a' * 32, 'password': 'test-password',
                 'opencode_config': {}}
         self.client._docker = Mock(side_effect=['', '127.0.0.1:43123'])
-        with patch('hearth.agents.agent_container.requests.get', return_value=Mock(ok=True)), \
+        with patch('llama_web.agents.agent_container.requests.get', return_value=Mock(ok=True)), \
              patch.object(self.client, '_write_runtime'):
-            self.client._start_container('hearth-agent-fixture', info, task_dir)
+            self.client._start_container('llama_web-agent-fixture', info, task_dir)
         run_args = self.client._docker.call_args_list[0].args
         self.assertIn(
             f'type=bind,src={task_dir / "opencode-skills"},dst=/home/node/.config/opencode/skills,readonly',
@@ -68,7 +68,7 @@ class AgentContainerTests(unittest.TestCase):
 
     def test_resume_replaces_session_with_stale_thinking_setting(self):
         job = {'id': 'c'*32, 'model': {'providerID': 'lmstudio', 'id': 'fixture'},
-               'enable_thinking': False, 'session_id': 'hearth-agent-'+'c'*24+'::old'}
+               'enable_thinking': False, 'session_id': 'llama_web-agent-'+'c'*24+'::old'}
         info = {'tool_policy_version': 'native-tools-v1', 'opencode_config': {'provider': {
             'lmstudio': {'options': {'extraBody': {'chat_template_kwargs': {'enable_thinking': True}}}}}}}
         with patch.object(self.client, '_read_runtime', return_value=info), \
@@ -80,7 +80,7 @@ class AgentContainerTests(unittest.TestCase):
 
     def test_resume_refreshes_lmstudio_session_missing_native_thinking_flag(self):
         job = {'id': 'c'*32, 'model': {'providerID': 'lmstudio', 'id': 'fixture'},
-               'enable_thinking': True, 'session_id': 'hearth-agent-'+'c'*24+'::old'}
+               'enable_thinking': True, 'session_id': 'llama_web-agent-'+'c'*24+'::old'}
         info = {'tool_policy_version': 'native-tools-v1', 'opencode_config': {'provider': {
             'lmstudio': {'options': {'extraBody': {'chat_template_kwargs': {'enable_thinking': True}}}}}}}
         with patch.object(self.client, '_read_runtime', return_value=info), \
@@ -119,9 +119,9 @@ class AgentContainerTests(unittest.TestCase):
                              'base_url': f'http://127.0.0.1:{upstream.server_port}/v1'})
         connection = http.client.HTTPConnection('localhost', timeout=2)
         try:
-            with patch('hearth.agents.agent_container.live_requests.start', return_value=1) as start, \
-                 patch('hearth.agents.agent_container.live_requests.update', side_effect=lambda *args, **kwargs: progressed.set()), \
-                 patch('hearth.agents.agent_container.live_requests.finish'):
+            with patch('llama_web.agents.agent_container.live_requests.start', return_value=1) as start, \
+                 patch('llama_web.agents.agent_container.live_requests.update', side_effect=lambda *args, **kwargs: progressed.set()), \
+                 patch('llama_web.agents.agent_container.live_requests.finish'):
                 relay.start()
                 connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 connection.sock.settimeout(2)
@@ -156,15 +156,15 @@ class AgentContainerTests(unittest.TestCase):
 
         response.iter_content.side_effect = chunks
         response.close.side_effect = closed.set
-        name = 'hearth-agent-fixture'
+        name = 'llama_web-agent-fixture'
         relay = _ModelProxy({'socket_path': str(Path(self.tempdir.name)/'interrupt.sock'),
                              'token': 'fixture', 'task_id': 'task-fixture', 'provider_id': 'lmstudio',
                              'base_url': 'http://127.0.0.1:1234/v1'})
         connection = http.client.HTTPConnection('localhost', timeout=2)
         try:
-            with patch('hearth.agents.agent_container.requests.request', return_value=response), \
-                 patch('hearth.agents.agent_container.live_requests.start', return_value=1), \
-                 patch('hearth.agents.agent_container.live_requests.finish'), \
+            with patch('llama_web.agents.agent_container.requests.request', return_value=response), \
+                 patch('llama_web.agents.agent_container.live_requests.start', return_value=1), \
+                 patch('llama_web.agents.agent_container.live_requests.finish'), \
                  patch.object(self.client, '_split', return_value=(name, 'session', {})), \
                  patch.object(self.client, '_endpoint') as endpoint:
                 relay.start()
