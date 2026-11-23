@@ -46,7 +46,6 @@ systemctl enable --now docker.service
 # Generate the authenticated model gateway: random per-client bearer tokens (used as the
 # apiKey in the OpenCode/Continue configs), the Caddyfile blocks, and Caddy's local CA.
 # Existing tokens are preserved, and a legacy hand-installed block is left untouched.
-# This runs before the optional backend packages so a missing FastFlowLM bundle cannot
 # leave the gateway half-configured.
 if command -v caddy >/dev/null; then
   python3 "${project_dir}/tools/caddy_gateway_setup.py" \
@@ -54,12 +53,7 @@ if command -v caddy >/dev/null; then
     --owner "$target_user" \
     --system-file /etc/caddy/Caddyfile
 fi
-apt-get install -y "${target_home}/.local/share/hearth/downloads/fastflowlm.deb"
 usermod -aG render,video,docker "$target_user"
-render_template "${project_dir}/deploy/systemd/flm.service" /etc/systemd/system/flm.service
-chmod 0644 /etc/systemd/system/flm.service
-render_template "${project_dir}/deploy/polkit/50-flm.rules" /etc/polkit-1/rules.d/50-flm.rules
-chmod 0644 /etc/polkit-1/rules.d/50-flm.rules
 systemctl daemon-reload
 # Ubuntu 26.04 includes Lemonade in its own package repository.
 "${project_dir}/.venv/bin/python" -m playwright install-deps chromium

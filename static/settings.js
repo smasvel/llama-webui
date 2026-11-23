@@ -1,6 +1,4 @@
 (() => {
-  const BACKEND_LABELS = { lmstudio: "LM Studio", lemonade: "Ryzen AI / Lemonade", vllm: "vLLM", opencode: "opencode.ai", kobold: "KoboldCPP", q38rocm: "q38rocm (Vulkan/ROCmFPX)", fastflowlm: "FastFlowLM" };
-  const BACKEND_ORDER = ["fastflowlm", "q38rocm", "lemonade", "lmstudio", "kobold", "vllm", "opencode"];
 
   const settingsForm = document.getElementById("settings-form");
   const restartBackendsBtn = document.getElementById("restart-backends");
@@ -159,8 +157,6 @@
 
   const settingsQ38rocmUrlEl = document.getElementById("settings-q38rocm-url");
   const settingsQ38rocmKeyEl = document.getElementById("settings-q38rocm-key");
-  const settingsFastflowlmUrlEl = document.getElementById("settings-fastflowlm-url");
-  const settingsFastflowlmKeyEl = document.getElementById("settings-fastflowlm-key");
   const settingsDefaultModelEl = document.getElementById("settings-default-model");
   const settingsWebSearchEnabledEl = document.getElementById("settings-web-search-enabled");
   const settingsWebSearchModeEl = document.getElementById("settings-web-search-mode");
@@ -196,13 +192,10 @@
   const settingsTestKoboldResultEl = document.getElementById("settings-test-kobold-result");
   const settingsTestQ38rocmBtn = document.getElementById("settings-test-q38rocm");
   const settingsTestQ38rocmResultEl = document.getElementById("settings-test-q38rocm-result");
-  const settingsTestFastflowlmBtn = document.getElementById("settings-test-fastflowlm");
-  const settingsTestFastflowlmResultEl = document.getElementById("settings-test-fastflowlm-result");
   const settingsTestCaddyLmstudioBtn = document.getElementById("settings-test-caddy-lmstudio");
   const settingsTestCaddyLemonadeBtn = document.getElementById("settings-test-caddy-lemonade");
   const settingsTestCaddyVllmBtn = document.getElementById("settings-test-caddy-vllm");
   const settingsTestCaddyKoboldBtn = document.getElementById("settings-test-caddy-kobold");
-  const settingsTestCaddyFastflowlmBtn = document.getElementById("settings-test-caddy-fastflowlm");
   const settingsTestCaddyResultEl = document.getElementById("settings-test-caddy-result");
   const settingsLemonadeThinkingEl = document.getElementById("settings-lemonade-thinking");
   const settingsTailscaleDetectedEl = document.getElementById("settings-tailscale-detected");
@@ -212,7 +205,6 @@
   const settingsTestTailscaleLemonadeBtn = document.getElementById("settings-test-tailscale-lemonade");
   const settingsTestTailscaleVllmBtn = document.getElementById("settings-test-tailscale-vllm");
   const settingsTestTailscaleKoboldBtn = document.getElementById("settings-test-tailscale-kobold");
-  const settingsTestTailscaleFastflowlmBtn = document.getElementById("settings-test-tailscale-fastflowlm");
   const settingsTestTailscaleResultEl = document.getElementById("settings-test-tailscale-result");
   const settingsChatDefaultMaxTokensEl = document.getElementById("settings-chat-default-max-tokens");
   const settingsChatMaxMaxTokensEl = document.getElementById("settings-chat-max-max-tokens");
@@ -269,7 +261,6 @@
         // `quantization` is normalized by each client to the actual compute path when
         // known (NPU, GPU, CPU). This prevents an "-NPU" marketing/model name from being
         // mistaken for NPU execution when Lemonade reports a llamacpp/GPU recipe.
-        const compute = m.backend === "fastflowlm" ? "NPU" : (m.quantization || "device unknown");
         opt.textContent = `${m.id} — ${compute}${m.state === "loaded" ? " · loaded" : ""}`;
         group.appendChild(opt);
       }
@@ -313,8 +304,6 @@
 
     settingsQ38rocmUrlEl.value = data.q38rocm_base_url || "";
     settingsQ38rocmKeyEl.value = data.q38rocm_api_key || "";
-    settingsFastflowlmUrlEl.value = data.fastflowlm_base_url || "";
-    settingsFastflowlmKeyEl.value = data.fastflowlm_api_key || "";
     savedDefaultModel = data.lan_default_model || "";
     renderDefaultModelSelect();
     settingsWebSearchEnabledEl.checked = data.web_search_enabled !== false;
@@ -353,7 +342,6 @@
       if (data.caddy.ports?.lemonade) lines.push(`Ryzen AI LAN port: ${data.caddy.ports.lemonade}`);
       if (data.caddy.ports?.vllm) lines.push(`vLLM LAN port: ${data.caddy.ports.vllm}`);
       if (data.caddy.ports?.kobold) lines.push(`KoboldCPP LAN port: ${data.caddy.ports.kobold}`);
-      if (data.caddy.ports?.fastflowlm) lines.push(`FastFlowLM LAN port: ${data.caddy.ports.fastflowlm}`);
       settingsCaddyInfoEl.innerHTML = lines.length
         ? lines.map((l) => escapeHtml(l)).join("<br>")
         : "Caddyfile found, but no recognized LM Studio/Lemonade proxy blocks in it.";
@@ -411,8 +399,6 @@
 
           q38rocm_base_url: settingsQ38rocmUrlEl.value.trim(),
           q38rocm_api_key: settingsQ38rocmKeyEl.value.trim(),
-          fastflowlm_base_url: settingsFastflowlmUrlEl.value.trim(),
-          fastflowlm_api_key: settingsFastflowlmKeyEl.value.trim(),
           lan_default_model: settingsDefaultModelEl.value,
           chat_default_max_tokens: numOrNull(settingsChatDefaultMaxTokensEl),
           chat_max_max_tokens: numOrNull(settingsChatMaxMaxTokensEl),
@@ -561,10 +547,6 @@
       api_key: settingsKoboldKeyEl.value.trim(),
     })
   );
-  settingsTestFastflowlmBtn.addEventListener("click", () =>
-    runTest(settingsTestFastflowlmBtn, settingsTestFastflowlmResultEl, "fastflowlm", {
-      base_url: settingsFastflowlmUrlEl.value.trim(),
-      api_key: settingsFastflowlmKeyEl.value.trim(),
     })
   );
   settingsTestCaddyVllmBtn.addEventListener("click", () =>
@@ -573,8 +555,6 @@
   settingsTestCaddyKoboldBtn.addEventListener("click", () =>
     runTest(settingsTestCaddyKoboldBtn, settingsTestCaddyResultEl, "caddy_kobold", {})
   );
-  settingsTestCaddyFastflowlmBtn.addEventListener("click", () =>
-    runTest(settingsTestCaddyFastflowlmBtn, settingsTestCaddyResultEl, "caddy_fastflowlm", {})
   );
   settingsTestCaddyLmstudioBtn.addEventListener("click", () =>
     runTest(settingsTestCaddyLmstudioBtn, settingsTestCaddyResultEl, "caddy_lmstudio", {})
@@ -594,8 +574,6 @@
   settingsTestTailscaleKoboldBtn.addEventListener("click", () =>
     runTest(settingsTestTailscaleKoboldBtn, settingsTestTailscaleResultEl, "tailscale_kobold", {})
   );
-  settingsTestTailscaleFastflowlmBtn.addEventListener("click", () =>
-    runTest(settingsTestTailscaleFastflowlmBtn, settingsTestTailscaleResultEl, "tailscale_fastflowlm", {})
   );
 
   fetchSettings();

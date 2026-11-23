@@ -1,5 +1,4 @@
 (() => {
-  const BACKEND_LABELS = { lmstudio: "LM Studio", lemonade: "Ryzen AI", vllm: "vLLM", opencode: "opencode.ai", kobold: "KoboldCPP", fastflowlm: "FastFlowLM", q38rocm: "q38rocm", wan22: "Video generation" };
   const modelListEl = document.getElementById("model-list");
   const modelSelectEl = document.getElementById("model-select");
   let preferredChatModel = modelSelectEl.dataset.preferredModel || "";
@@ -406,7 +405,6 @@
         const el = document.getElementById(id);
         if (el && typeof val === "string") el.textContent = val;
       };
-      set("help-flm-status", d.flm_status);
       set("help-opencode-config", d.opencode_config);
       set("help-config-yaml", d.continue_yaml);
       set("help-ca-cert", d.ca_cert);
@@ -517,7 +515,6 @@
       { key: "lemonade", label: "Ryzen AI (NPU)" },
       { key: "vllm", label: "vLLM" },
       { key: "kobold", label: "KoboldCPP" },
-      { key: "fastflowlm", label: "FastFlowLM (NPU)" },
     ];
     for (const group of groups) {
       const groupModels = models.filter((m) => m.backend === group.key);

@@ -105,7 +105,6 @@ ensure_env() {
 ensure_env HEARTH_HOST_HOME "$HOME"
 ensure_env HEARTH_LOCAL_MODELS_DIR "$local_models_dir"
 # The host Hearth install runs as this user; the Docker container chowns shared state
-# (FastFlowLM paused/active files) to it so both installs can drive the same backend.
 ensure_env HEARTH_HOST_UID "$(id -u)"
 ensure_env HEARTH_HOST_GID "$(id -g)"
 chmod 600 .env.docker
@@ -114,7 +113,6 @@ state_dir=$("${compose[@]}" config --format json | python3 -c 'import json,sys; 
 mkdir -p "$state_dir" "$local_models_dir" "$HOME/.lmstudio" "$HOME/.cache/huggingface"
 chmod 700 "$state_dir"
 # Install the Docker backend-control broker on this host, so the containerized Hearth app can
-# start/stop the shared host backends (vLLM / KoboldCPP / FastFlowLM) and run `flm` on
 # the host. Idempotent; skip when another install already created it fresh.
 if [[ $skip_backend_broker -eq 1 ]]; then
   echo 'Skipping the backend-control broker (--skip-backend-broker).'
@@ -134,7 +132,6 @@ else
   echo 'Skipping the LM Studio API bootstrap service (--skip-lmstudio-server).'
 fi
 # Mount the host's systemd-managed backend state directories into the container at the
-# same absolute path so the *inventory* (registry, service.env, FLM active-file) is shared
 # with the Docker Hearth install. The **broker** (deploy/install-backend-broker.sh) runs
 # the actual systemctl commands on the Hearth host; the mounts are what make the
 # registration and service files visible to the running app.

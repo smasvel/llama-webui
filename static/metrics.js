@@ -328,7 +328,6 @@
   });
 
   // Live activity feed: LM-Studio-dev-log-style view of generations streaming right now -
-  // webui chat, plus OpenCode/Continue traffic through Lemonade/FastFlowLM (their LAN shims
   // report it directly, see live_report.py); LM Studio/vLLM/KoboldCPP LAN traffic still can't
   // appear (see live_requests.py). Polled on its own faster interval since it's meant to feel
   // live, independent of the 15s KPI/table refresh and unaffected by the range selector or

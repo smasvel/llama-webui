@@ -601,7 +601,6 @@ Reported as "still not able to browse through playwright," with a real pasted ex
 `"Can you search about the pregnancy pain through the browser"`, got back *"I cannot browse the
 internet or access live web content..."* Traced via `chat_history.db` (same technique as the
 earlier image-hallucination and radar case studies) to the exact model used: **`QwenFLM17B`**
-(`qwen3:1.7b`, a small NPU/FastFlowLM reasoning model) — and confirmed the failure happened *after*
 the browse-detection fix above was already deployed, so this was a new, different bug, not a stale
 build.
 
@@ -687,7 +686,6 @@ codebase-search feature, documented in the Help panel's Continue section.
 A real report: Continue's responses via the Ryzen AI (Lemonade) model seemed shallow and not
 properly following the actual ask. Worked through methodically rather than guessing at a fix:
 
-1. **Checked whether Lemonade/FastFlowLM exposes a separate reasoning channel at all** — it
    doesn't. Confirmed live: neither top-level `"enable_thinking": true` nor the standard
    `"chat_template_kwargs": {"enable_thinking": true}` produced a `reasoning_content` field or
    `<think>` tags, on either the tiny `QwenFLM06B` (0.6B) or the full `qwen3.6-moe-35b-a3b`. This is
@@ -721,11 +719,9 @@ the original `QwenFLM06B` smoke-test entry — the small model was only ever mea
 integration worked, not for real use, and load history showed the bigger model is what's actually
 being used day to day.
 
-**Still an open, separate gap, not fixed**: Lemonade/FastFlowLM doesn't expose `reasoning_content`
 at all right now, on any model tested. If Continue's UI is expected to show a distinct "thinking"
 block the way it might for an Anthropic or LM Studio model, that won't happen for Ryzen AI
 responses today — not a config problem, a real backend limitation. Worth re-checking after a
-Lemonade/FastFlowLM update.
 
 ## Video generation (ComfyUI + Wan 2.1)
 
@@ -1056,7 +1052,6 @@ session, consistent with every other API route in this app).
 
 The composer also has a target-language selector and a 🌐 translation microphone. It records one
 utterance, converts the browser's WebM/Opus recording to 16 kHz mono WAV, and sends an OpenAI-style
-`input_audio` block to the already-installed `gemma4-it:e4b` model through FastFlowLM. Gemma 4 E4B
 runs on the Ryzen AI NPU and includes its own 913 MB audio encoder; the complete local model occupies
 about 8.5 GB. The translated text is shown in chat and spoken through the existing local Kokoro TTS
 model. No recording, transcript, or translation is sent to Gemini or another cloud service.
@@ -1198,9 +1193,6 @@ genuinely offer different capabilities here, not because of an arbitrary split:
   search` subcommand exists, no undocumented catalog/search HTTP endpoint responds either — only
   `/api/v0/models`, which lists local downloads, not a remote catalog). Same "type a name, it
   resolves and downloads the best match" flow as before, just moved to this page.
-- **Ryzen AI NPU (FastFlowLM) — exact tag** — also moved here, unchanged in behavior. Not folded
-  into the catalog search above because FastFlowLM's NPU model list is a genuinely separate
-  catalog this app has no OS permission to read directly (`flm list` needs root — confirmed live:
   even this app's own service user gets a flat permission-denied on the binary itself).
 
 **Search gap found and fixed same day: "glm 5.2" returned nothing.** Real user report.
@@ -1251,22 +1243,16 @@ afterward — then cleaned up via delete, confirming the state flips back correc
 
 **Follow-on bug, same day: "not all downloaded models are visible in the Models page."** Real
 user report, and a direct consequence of the Download Models page above making it possible to
-pull arbitrary non-flm (llamacpp) models for the first time. `lemonade_client.list_models()`
 (what actually populates the Models panel — a different function from the catalog *search* above)
-only ever included two kinds of entry: `recipe == "flm"` ones (always, regardless of load state)
-and *currently loaded* ones (a safety net). Any non-flm model that was downloaded but not
 currently loaded fell through both — confirmed live with two real, genuinely-downloaded models
 (`Qwen3-Coder-30B-A3B-Instruct-GGUF`, downloaded via the Download Models page itself, and
 `nomic-embed-text-v1-GGUF` while idle) that were completely absent from the Models panel despite
-`downloaded: true` in the raw catalog. This mattered less before today, since the only non-flm
 custom download was the embedding model, which stays loaded most of the time — the loaded-only
 safety net usually papered over it.
 
 **Fix**: the primary loop now also keeps any entry with `downloaded: true`, regardless of recipe
-— confirmed live (multiple real pulls/deletes) that unlike flm, `downloaded` genuinely is
 reliable for llamacpp entries; it's the same field the Download page's own search already trusts
 for its "downloaded" badge. One thing this touched that needed care: that loop had always
-hardcoded `"type": "llm"` for every entry, which was harmless while only flm (always chat models)
 passed through it — now that the embedding model can flow through this same loop when unloaded,
 that hardcoding would have silently reintroduced the "embedding model shows up in the chat
 dropdown" bug fixed earlier. Fixed by reading the catalog entry's own `labels` field (`labels:
@@ -1306,7 +1292,6 @@ progress, then correctly sees it clear the moment it completes.
 ### Follow-up: a search box for every backend, and mandatory sizes
 
 The page now also starts with **Search all backends**, which queries LM Studio, Lemonade,
-vLLM, KoboldCPP, and FastFlowLM together and returns the same normalized fields for every
 card: backend, format, execution compatibility, size, task type, update date, popularity,
 download state, and a verified source link. Backend-specific sections remain available for
 focused browsing.
@@ -1317,7 +1302,6 @@ to `lms get` invokes its fuzzy catalog resolver and was observed sitting indefin
 animated resolution UI; the full URL is the CLI's documented direct-Hugging-Face path and
 was verified through Hearth's SSE download endpoint against an installed model.
 
-The three-section split above (real search for Lemonade only; LM Studio and FastFlowLM as
 plain "type a name/tag" forms) was closed out — **every backend now has a card-based search on
 the Downloads page**, all rendering through the same `renderResults()` cards and
 `/api/models/search?backend=...` endpoint:
@@ -1329,9 +1313,7 @@ the Downloads page**, all rendering through the same `renderResults()` cards and
   byte-level download). This replaced LM Studio's old "no search, by design" note: it has no
   *catalog* API of its own, but it doesn't need one to search the same HF index everything
 else does. The by-exact-name / full-HF-URL box is kept below the results as a fallback.
-- **FastFlowLM** searches its own fixed **NPU catalog** — `flm list --filter all --json`, which
   (unlike the earlier "needs root" finding for the *NPU* itself) runs fine as this user for a
-  plain listing. `fastflowlm_client.search_catalog()` filters it client-side by
   tag/family/params/quant/label, shows each model's real on-NPU footprint as its size, marks
   already-`installed` tags as downloaded, and sorts installed-first then smallest-first. Its
   empty query loads the whole catalog to browse; the by-exact-tag box is kept as a fallback.
@@ -1362,7 +1344,6 @@ lower-level, more commonly-documented path, but it ships no chat server at all (
 serving loop, tokenizer handling, and KV-cache management yourself) and its hybrid NPU+GPU
 execution provider has historically been Windows-first. Lemonade, by contrast, was confirmed (via
 live search while building this — see below) to be, as of **March 2026**, *"the first working
-end-to-end path for LLM inference on AMD Ryzen AI NPUs under Linux"* (Lemonade 10.0 + FastFlowLM
 runtime) — and it's already an OpenAI-compatible HTTP server, so integrating it is the same shape
 as `lmstudio_client.py`, not a from-scratch inference stack.
 
@@ -1371,32 +1352,21 @@ install lemonade-server`, runs as the system service `lemond.service`, listening
 `http://localhost:13305` — `LEMONADE_BASE_URL` to override). `system-info` confirms real hardware,
 not assumed: XDNA2 NPU, **58 TOPS int** measured (the 86 TOPS figure floated earlier was off — 58 is
 what Lemonade's own detection reports for the NPU alone), 12-core/24-thread CPU, `gfx1150` iGPU with
-2GB VRAM. Two backends installed for the hybrid path: `lemonade backends install flm:npu` (FastFlowLM,
 NPU) and `lemonade backends install llamacpp:vulkan` (GPU, same Vulkan path LM Studio already uses on
 this iGPU — avoids the ROCm gap noted in the ComfyUI section above). AMD's own `ryzenai-llm` NPU
 recipe reports `"state": "unsupported", "message": "Requires Windows"` on this machine — confirming
-FastFlowLM really is the only working NPU path on Linux right now, not just the easier one.
 
 **A real gotcha worth documenting**: Lemonade's built-in model registry (`lemonade list`, `GET
-/v1/models`) is GGUF-only — it carries no FastFlowLM/NPU models at all. NPU models are a separate,
-manual pull using FastFlowLM's *own* short tags (not a Hugging Face repo id):
 
 ```bash
-sudo /var/lib/lemonade/.cache/lemonade/bin/flm/npu/flm list      # e.g. qwen3:0.6b, llama3.2:1b, gemma3:4b
-lemonade pull user.MyModel --checkpoint main qwen3:0.6b --recipe flm
 ```
 
-Worse: once pulled, these `user.*` FLM models **don't appear in plain `GET /v1/models`** — a real
 user report caught this directly: unloading one made it vanish from the Models panel entirely
 instead of showing "not loaded" the way LM Studio models do. First fix attempt only checked
 `GET /v1/health`, which folded loaded models back in but didn't solve unloaded ones being invisible
 in the first place. The actual fix: `strace`-ing the `lemonade` CLI's own `list` command (rather
 than guessing further) showed it calls `GET /v1/models?show_all=true` — an undocumented query param
 that returns Lemonade's *entire* catalog, custom models included, regardless of load state. Its
-per-model `downloaded` field is unreliable for flm models though (`false` even for ones confirmed
-on disk via `du -sh`), so `lemonade_client.list_models()` instead filters on `recipe == "flm"` —
-reliable because Lemonade ships no built-in flm catalog entries of its own (confirmed live: every
-non-custom entry is llamacpp/sd-cpp/etc.), so any flm-recipe entry is one this app's Ryzen AI
 download path actually pulled. Verified live: loaded `QwenFLM06B`, unloaded it, confirmed via
 `/api/models` that it stayed listed as `"state": "not-loaded"` instead of disappearing, then
 reloaded it successfully.
@@ -1415,13 +1385,9 @@ called Lemonade's plain `POST /v1/pull {"model_name": ...}`, which only resolves
 names; a real report of pasting an LM Studio-style id (`qwen/qwen3.6-35b-a3b`) there came back with
 *"the model name must include the `user` namespace"*, since Lemonade was trying to register it as a
 new custom model. Fixed in `lemonade_client.search_and_download()`: it now always registers a
-`user.<slug>` custom model with `{"checkpoint": <tag>, "recipe": "flm"}` — confirmed against the
 live server, since this exact JSON shape isn't in the public REST docs, only the CLI's
-`--checkpoint`/`--recipe` flags are. The download box's hint text now says to use an exact FastFlowLM
-tag (`qwen3:0.6b`, from `flm list` above), not a Hugging Face repo id or an LM Studio catalog name.
 
 Verified with a real round trip through this app's own `/api/chat` (not just curling Lemonade
-directly): pulled `qwen3:0.6b` via FastFlowLM, loaded it onto the NPU, sent a chat message through
 the live app, got a correct streamed answer, and confirmed it persisted to `chat_store` with the
 right model name, duration, and token counts — same as any LM Studio response.
 **~57 tokens/sec decode, ~204 tokens/sec prefill** on this 0.6B model on the NPU, from the
@@ -1439,8 +1405,6 @@ trigger this app's usual "unload every other LM Studio model first" policy — s
 resource-pool treatment Colibri got, since it's a separate process with its own memory/NPU budget.
 
 **One real limitation, unlike LM Studio's fuzzy `lms get <query>` search**: neither Lemonade's
-catalog nor FastFlowLM has a free-text search endpoint — the Models panel's download box needs an
-*exact* FastFlowLM tag (a dropdown next to the query box switches which backend's catalog you're
 searching; see the gotcha below for exactly where those tags come from and why a Hugging Face repo
 id or LM Studio catalog name won't work there).
 
@@ -1640,7 +1604,6 @@ own `/proc/<pid>/environ`.
 
 Real user report: "failed to load whisper llm". `/api/models/load` for `Whisper-Tiny` returned a
 502 wrapping Lemonade's own `500` from `/v1/load`. Lemonade's logs (`sudo journalctl -u
-lemond.service` — a **system** unit, same `--user`-scope trap as `flm.service` earlier: checking
 it with `--user` silently shows nothing rather than erroring) showed the real cause:
 `whisper-server process has terminated with exit code: 134` (SIGABRT), instantly, on every retry.
 Running the binary manually surfaced the actual error under that: `libamd_comgr.so.3: failed to
@@ -1687,7 +1650,6 @@ outright failing). Two changes:
 
 Real user report: "model load is failing" for vLLM. Direct testing (stopping vllm.service, then
 calling `/api/models/load` for real) showed the opposite — it succeeded every time, auto-starting
-the stopped service correctly, same as KoboldCPP and FastFlowLM already did. The actual problem was
 in `models.js`: `toast()` unconditionally auto-hid after 4 seconds regardless of how long the
 operation actually took, and nothing else on the page changed until the whole request resolved. A
 cold vLLM start took a genuine 91 seconds in testing — so for ~87 of those seconds, the page looked
@@ -1700,19 +1662,15 @@ browser click-through of an actual ~90s vLLM cold start: the toast was confirmed
 correctly counting up at the 10s/30s/50s/70s marks (all well past the old 4s cutoff), then flipped
 to the loaded state cleanly at completion, with zero JS errors.
 
-## Tool-calling for OpenCode: FastFlowLM can't, vLLM can
 
-Real user report: "OpenCode not working on FastFlowLM/LAN". Diagnosed by sending the exact request
 OpenCode sends — a `tools`-bearing chat completion — directly at each backend's real LAN Caddy
 endpoint (not localhost, to rule out the proxy layer). Chat itself worked fine everywhere (200s in
 7-10s); the actual gap was **tool-calling**. OpenCode is agentic: every request carries function
 definitions (`bash`, `read`, `edit`, …) and it needs the model's reply to come back as a structured
 OpenAI-format `tool_calls` array, not prose, so it has something to execute.
 
-**FastFlowLM (both `llama3.2:1b` and `qwen3.6-moe:35b-a3b`) accepts the `tools` parameter but never
 returns `tool_calls`** — it just answers in plain text/markdown ("You can use `ls -l`…"). This is a
 genuine runtime limitation, not a bug in this app or a Caddy misconfiguration: the OpenAI-compatible
-surface FLM exposes doesn't implement the tool-calling half of the spec.
 
 **vLLM does**, once told to: `vllm.service`'s `ExecStart` (`~/.config/systemd/user/vllm.service`)
 gained `--enable-auto-tool-choice --tool-call-parser hermes`. `hermes` matches the ChatML-style
@@ -1735,43 +1693,28 @@ OpenCode's first request paying a cold-load penalty) — so as soon as vLLM was 
 `vllm/Qwen/Qwen2.5-3B-Instruct` at `https://<lan-ip>:8445/v1` with no code change needed there.
 Re-copy the config from the Help panel to pick this up.
 
-Net effect at the time: FastFlowLM/NPU was the right choice for plain chat but not OpenCode — see the
 follow-up immediately below, which found and fixed the actual root cause.
 
-### Follow-up: FastFlowLM tool-calling actually fixed via a small shim
 
-The "FastFlowLM can't" conclusion above turned out to be half right: FastFlowLM's server-side output
 *parsing* for tool calls is genuinely complete and correct — the missing piece was upstream of that,
 in what it does with an incoming request. Confirmed by reading the model's own
-`~/.config/flm/models/*/chat_template.jinja` directly rather than guessing: it has full tool-calling
 logic (Qwen's own format — `<tool_call>\n<function=NAME>\n<parameter=P>value</parameter>\n</function>\n
 </tool_call>`), rendered from a `# Tools\n\n...` system block whenever the template's `tools` Jinja
-variable is populated. FastFlowLM's server evidently never populates it from the request's `tools`
 field — so the model never sees the block and has no idea it's supposed to answer that way, and just
 answers in prose instead.
 
 **The fix turned out not to need any output-side parsing at all.** Manually constructing that exact
 system-block text (copied verbatim from the template) and sending it as a literal system message —
-with the request's `tools` field left out entirely, since FLM ignores it either way — was enough:
-FastFlowLM's own response handling correctly detected the model's `<tool_call>` output and returned a
 proper structured `tool_calls` array on its own, in both streaming and non-streaming mode, and
 correctly consumed a `tool` role follow-up message (the result being fed back) on a second turn to
-produce a real final answer. Verified directly against FastFlowLM's raw API (bypassing Caddy) before
 touching anything else, to isolate this from any proxy-layer possibility.
 
-**Shipped as `flm_tool_shim.py`**, a small reverse-proxy Flask app (its own
-`flm-tool-shim.service`, `127.0.0.1:52626`) sitting between Caddy and FastFlowLM's real server
 (`127.0.0.1:52625`): a `/v1/chat/completions` request carrying `tools` gets that one system message
 injected before being forwarded; everything else (including `/v1/models` and every other path) is
 proxied through byte-for-byte unmodified — the shim never touches a response. One more real bug
 surfaced while testing this shim through the *actual* Caddy LAN path with OpenCode's real generated
-config: OpenCode's config uses this app's own `flm/qwen3.6-moe:35b-a3b` id (the `flm/` prefix
-`fastflowlm_client.py` uses to disambiguate FastFlowLM's tags from Lemonade's overlapping ones,
 per that module's docstring) as the literal `model` field — sending that prefixed string straight to
-FastFlowLM (which expects the bare tag) didn't error, but produced *badly* malformed tool-call XML
 (missing closing tags, spurious fields) where the bare tag reliably produced correct output. The
-shim strips the prefix before forwarding, same as `fastflowlm_client._tag()` already does for this
-app's own (non-shimmed) calls to FLM.
 
 Caddy's `:8447` block (`reverse_proxy @authorized localhost:52625`) was repointed at the shim
 (`localhost:52626`) — validated with `caddy validate` before `systemctl reload caddy` (a reload, not
@@ -1780,20 +1723,14 @@ exact same test suite that first caught the failure, now run three times against
 (`https://<ip>:8447`, TLS + bearer auth): auth enforcement, non-streaming tool calls, streaming tool
 calls (`finish_reason: tool_calls`, correctly fragmented SSE deltas), and the full
 call → tool-result → final-answer round trip, all passing against `qwen3.6-moe:35b-a3b` — the exact
-model and exact LAN path the original bug report was about. FastFlowLM's own
-`fastflowlm_client.py` (used by this app's own /api/chat, which never sends `tools`) is untouched by
-any of this — it still talks to FastFlowLM on :52625 directly.
 
 Two follow-on bugs, both caught by actually using the shim through OpenCode rather than stopping at
 the tool-calling test suite:
 
 **Real user report right after landing this: OpenCode still produced degenerate garbage output**
-(this time repeated `?`/fragment tokens, not the earlier `/` corruption). Cause: `fastflowlm_client.
 chat_stream()` already sends `frequency_penalty=0.3` as a repetition guard for this app's own calls
 (a fix from earlier the same day — quantized NPU models on this backend reliably degenerate into a
 token-repetition loop past a few hundred tokens with no penalty at all). But OpenCode's requests go
-through the shim, which never touches `fastflowlm_client.py` at all — so they got no penalty and hit
-the exact same failure mode again, just via a different path than the one already fixed. `flm_tool_
 shim.py` now applies the same `frequency_penalty=0.3` default (only if the caller didn't already set
 one) before forwarding. Verified with a 500-token generation through the real LAN path — clean
 markdown throughout, zero degeneration — plus a full re-run of the tool-calling suite to confirm the
@@ -1802,15 +1739,10 @@ penalty doesn't interfere with tool-call detection.
 **Also found while testing this specific fix**: the port-to-backend map both `app.py`'s
 `_read_caddy_info()` (Settings page's "Test via Caddy" button) and `help_data.parse_caddyfile()`
 (Help panel's port table / generated configs) use to recognize which Caddy block is which backend is
-keyed on the *upstream* port number — and both only knew about `52625` (FastFlowLM's raw server), not
 `52626` (the shim Caddy now actually points `:8447` at). Repointing Caddy silently broke both of
-those, surfacing as "No fastflowlm proxy block found in Caddyfile." Fixed by having both maps treat
-either port as "this is the fastflowlm block."
 
 **A third bug, worse than the first two**: real user report — a live OpenCode reply came back
 visibly corrupted mid-sentence (coherent text, then a stray `</think>`, then garbage tokens like
-`__`/`—`). Confirmed directly from `flm.service`'s own request/response logs (`journalctl -u
-flm.service`), which capture the exact raw request OpenCode sent and FLM's raw generated text —
 this is what made the diagnosis possible instead of guesswork: `qwen3.6-moe:35b-a3b` is a
 *thinking* model, and its chat template (like the "Tools" block above) forces every assistant turn
 to open with a `<think>\n` block by default. On a tool-result-summarization turn deep in a real
@@ -1821,10 +1753,8 @@ then appeared to get confused about where its own `</think>` closing marker belo
 `length`, confirming this was the model breaking format, not hitting a token cap — i.e., a genuinely
 separate failure mode from the `/`-corruption and `?`-repetition bugs above, not a variant of either.
 
-Confirmed FastFlowLM honors the standard `enable_thinking: false` request field (verified directly
 against its raw API): with it set, the model's template maps to a pre-closed empty think block
 instead of an open one, and the reply comes back completely clean, no `<think>` framing at all.
-Since OpenCode's tool-loop doesn't need a visible reasoning trace anyway, `flm_tool_shim.py` now
 defaults `enable_thinking: false` on every request unless the caller already specified one — this
 avoids the entire failure class up front rather than trying to detect and strip corrupted output
 after the fact. Verified by replaying the actual failing scenario (the same wifi-scan tool result,
@@ -1832,7 +1762,6 @@ fed back for summarization): a clean, complete answer with a proper markdown tab
 follow-up question, zero stray tags — plus a full re-run of the tool-calling test suite (still
 16/16) to confirm disabling thinking doesn't interfere with tool-call detection.
 
-## KoboldCPP and FastFlowLM backends
 
 Two more local backends were added, each behind its own authenticated Caddy port and each with
 the **same Search / Download / Load / Unload / Delete lifecycle and LAN API surface as Lemonade**
@@ -1852,21 +1781,12 @@ runtime load API of its own — so, exactly like vLLM, this app builds one on to
 - Download search reuses the Hugging Face GGUF index (see the Downloads-page search follow-up
   above).
 
-**FastFlowLM** (`fastflowlm_client.py`) is the AMD Ryzen AI **NPU** runtime run **standalone**
-(`flm serve`, OpenAI-compatible on `127.0.0.1:52625`), rather than through Lemonade:
 
-- FastFlowLM and Lemonade drive the **same NPU** and only one `flm` process can hold it at a
   time, so this backend and Lemonade's NPU models are **mutually exclusive** — the load endpoint
   in `app.py` frees the other before activating this (`_free_npu_except` / `_lemonade_is_npu`).
-  FLM tags (`llama3.2:1b`, `deepseek-r1:8b`, …) overlap Lemonade's flm-recipe ids, so this app
-  namespaces them with an `flm/` prefix for unambiguous routing (stripped when talking to FLM).
-- The `flm serve` process must run as a **system** unit (`flm.service`) because the NPU needs
   raised memlock, which a `--user` unit can't grant (confirmed: a user unit's
   `LimitMEMLOCK=infinity` still resolved to 8192). The app controls that system unit **without a
-  password** via a polkit rule (`/etc/polkit-1/rules.d/50-flm.rules`) — start/stop only. `flm
-  list` / `flm pull` run the binary directly as this user (no NPU, no memlock needed).
 - LAN: Caddy `:8447` → `localhost:52625`.
-- Download search hits FLM's own fixed NPU catalog (`flm list`), see the Downloads-page follow-up
   above.
 
 Both are wired into every shared code path that previously special-cased backends: the model
@@ -1884,7 +1804,6 @@ throughput, and NPU TOPS.
   `source="webui-chat"`) with exact tokens, tok/s, TOPS, backend, model, response time, and an
   inferred *ask category* (coding / reasoning / general / …).
 - **LAN tool** rows are attributed primarily through `X-Hearth-Client` and secondarily
-  through User-Agent detection. Lemonade and FastFlowLM traffic passes through inline shims
   that record model, token usage, throughput, NPU status, and streaming content.
   Backends without an inline shim are captured by `caddy_metrics.py`, a background tailer
   over Caddy's JSON access log (`/var/log/caddy/access.jsonl`), with the fields visible at
@@ -1922,7 +1841,6 @@ tok/s, elapsed time, request text, and response text as it arrives. The admin-on
 `GET /api/metrics/live` endpoint drives the “Live developer logs” card, which polls every
 second and provides an expandable request/response trace for each entry.
 
-The in-app chat worker reports directly. Lemonade and FastFlowLM LAN traffic—including
 OpenCode, Continue, and `market_analysis`—is reported by their inline proxy shims through
 localhost-only `/api/internal/live/*` endpoints. Captures exclude authorization headers and
 full tool schemas, are capped at 4,000 characters per request and response, and are visible
@@ -1932,11 +1850,9 @@ Active streaming state stays in memory. Finished traces are persisted in the loc
 `developer_traces` PostgreSQL table, survive service restarts, and are automatically deleted
 after two days (172,800 seconds). A 5,000-entry ceiling provides an additional disk bound.
 
-Verified against the real backends: a FastFlowLM `flm/qwen3.6-moe:35b-a3b` generation showed up
 immediately as `status: streaming`, `elapsed_s` ticking every poll, then flipped to `status: done`
 with the correct final token count (192) and computed tok/s (3.1) matching the request's actual
 62s wall-clock duration; a Lemonade NPU request that failed mid-stream (unrelated pre-existing NPU
-contention with FastFlowLM's own loaded model) correctly surfaced as `status: error` instead of
 hanging in the feed forever.
 
 ## Bigger context ceiling + per-client traffic attribution for OpenCode/Continue
@@ -1947,9 +1863,6 @@ opencode"), and there was no way to tell OpenCode's, Continue's, and this app's 
 apart in the metrics board ("also make config to differentiate the traffic from opencode vs vscode
 vs chat").
 
-**Context ceiling**: bumped Lemonade/FastFlowLM's advertised context from 32768 to 65536
-(`_CTX` in `help_data.py`, `flm.service`'s `--ctx-len 65536`, and Lemonade's own
-`recipe_options.json` — via `ctx_size`, since Lemonade's `flm_args` allowlist explicitly rejects a
 raw `--ctx-len` flag passed that way). Chosen as "a modest bump" over AskUserQuestion rather than
 maxing out the NPU's real ceiling, since headroom has to be kept in sync by hand in three places
 and an oversized advertised value gets the request truncated server-side instead of failing
@@ -2078,12 +1991,9 @@ end to end rather than guessing at a fix:
    XDNA2 chip, not the CPU — CPU staying quiet while the NPU works is the whole point of using this
    backend, not evidence it's underutilized. Confirmed this isn't a red herring before looking
    anywhere else.
-2. **Checked whether the NPU was in a low-power mode.** `flm` (FastFlowLM's own NPU inference
-   binary, found at `/var/lib/lemonade/.cache/lemonade/bin/flm/npu/flm-real`) exposes
    `--pmode {powersaver,balanced,performance,turbo}`, defaulting to `performance` — confirmed via
    its own `--help` and the live process command line (`ps aux`showed no `--pmode` flag at all,
    meaning it was already on that default). Forced `turbo` anyway via
-   `lemonade config set flm.args="--pmode turbo"`, reloaded the model, re-benchmarked: **zero
    measurable difference** in prefill or decode speed. Also tried `--prefill-chunk-len 2048`:
    also zero difference. Reverted both — no benefit, only added config drift and (for turbo)
    possible extra power draw on a laptop-class chip.
@@ -2093,7 +2003,6 @@ end to end rather than guessing at a fix:
    globally throttled.
 4. **The real number for the daily-driver model**, `qwen3.6-moe-35b-a3b`, at a realistic ~470-token
    coding prompt: **~50 tok/s prefill, ~9.6 tok/s decode**. This is the actual hardware/kernel-bound
-   ceiling for a 35B-parameter MoE model on FastFlowLM's current NPU kernels — not a bug, not a
    missed setting, just what this model costs on this NPU today.
 
 **Fix**: not a config fix — there wasn't a misconfiguration to find. Downloaded a second NPU model,
@@ -2128,11 +2037,9 @@ others didn't, no pattern given. Root-caused rather than assumed:
    session: `Qwen3-Coder-Next`, `qwen3-coder-30B`, `Qwen3-30B-A3B-GGUF` — clearly an attempt to add
    a "Qwen3 Coder" NPU model via the Models panel's Ryzen AI download option, using a guessed
    checkpoint tag. Reproduced directly against `POST /v1/load`: all three fail with
-   `FLM pull failed with exit code: 1` — confirmed via `flm list` that FastFlowLM's real supported
    catalog has no "coder" variant of Qwen3 at all, so no tag resembling this could ever have worked.
 4. Tried the obvious next step — delete the three broken entries so they'd stop cluttering the
    Models panel. `POST /v1/delete` (and the `lemonade delete` CLI, same code path) failed too:
-   `FLM remove failed for <model> (exit code 1)`, because there was never anything on disk for it
    to remove in the first place.
 
 **This is an upstream Lemonade Server bug, not something in this app's code**: confirmed directly
@@ -2143,7 +2050,6 @@ metadata into its own registry (`/var/lib/lemonade/.cache/lemonade/user_models.j
 validating the pull succeeds, and never rolls that entry back on failure — so a failed custom-model
 download leaves a permanently stuck phantom entry behind regardless of how cleanly this app handled
 the error at the time. There's no API-level way to clean this up (delete goes through the same
-broken `flm remove` path), so a failed Ryzen AI download for a nonexistent checkpoint is a one-way
 trip to a stuck Models panel entry until someone edits that file by hand.
 
 **Fix applied**: backed up `user_models.json`, stopped `lemond` (the system-level service —
@@ -2155,8 +2061,6 @@ the service, and reloaded the daily-driver model. Verified live afterward: `list
 only real, working entries; load and unload both confirmed working cleanly against the actual
 model in use.
 
-**If this happens again**: only use checkpoint tags that actually appear in FastFlowLM's own
-`flm list` output (or this Help panel's documented tags) when adding a custom Ryzen AI model — a
 guessed or typo'd tag will "succeed" at the registration step and only fail later at load time,
 by which point it's already stuck. There's no in-app fix for the stuck entry itself; it requires
 the same manual `user_models.json` edit described above.
@@ -2183,7 +2087,6 @@ wasn't a missing feature — it was that filter silently failing for one specifi
 Root cause: `lemonade_client.list_models()`'s "safety net" loop (for models that are loaded but
 missing from Lemonade's `show_all` catalog) hardcoded `"type": "llm"` on every entry it added,
 regardless of what kind of model it actually was. The embedding model always takes this exact
-path — it's `recipe: "llamacpp"`, never `"flm"`, so it never appears in the function's primary
 catalog loop — meaning it was *always* mislabeled `"llm"` whenever it was loaded, defeating the
 frontend's own type check every time.
 
@@ -2230,7 +2133,6 @@ second-guessing the date mid-generation. Two separate, real bugs, not one:
    conditions (93.6°F, mainly clear, 43% humidity) instead of falling through.
 2. `frequency_penalty` now defaults to a mild `0.3` in both `lemonade_client.chat_stream()` and
    `lmstudio_client.chat_stream()` — confirmed live the param is accepted without error by both
-   the llamacpp-recipe and flm-recipe (FastFlowLM/NPU) paths. A general safety net, not a fix for
    this specific incident's root cause — pass `frequency_penalty=None` at a call site to disable
    it if it ever works against a particular model's own output in a way that matters more.
 
@@ -2365,9 +2267,7 @@ error, checkpoint isn't HF-hosted, no matching file found) returns "size unknown
 `check_safe_to_load`, which is treated as safe-to-proceed, not refused. A false negative here just
 means Lemonade's own crash-on-load happens as before (the pre-existing behavior, no worse than
 before this check existed); a false positive would incorrectly block a legitimate load, which is the
-direction this needed to be careful not to fail in. flm/NPU checkpoints (bare tags like
 `"qwen3.6-moe:35b-a3b"`, no HF-repo shape at all) always come back "size unknown" and are never
-blocked by this check for that reason — not a gap in practice, since FastFlowLM's own curated model
 catalog tops out at 24.3GB (`qwen3.6-moe:35b-a3b`, see the MTP section above), nowhere near this
 machine's RAM ceiling.
 
@@ -2419,11 +2319,8 @@ mixed H1/H2/H3 + bold/inline-code sample against the real CSS.
 ## OpenCode/Continue file creation failing — a cross-backend NPU memory guard
 
 Reported as "something is missing in the Caddy reverse proxy" — it wasn't. Diagnosis (via
-Caddy's access log, `journalctl -u flm.service`, and `free -h`) traced it to Lemonade and the
-standalone `flm.service` (behind the tool-calling shim on Caddy's `:8447`) both being able to
 load their own independent copy of the same NPU model (`qwen3.6-moe:35b-a3b`) on demand.
 Loaded at once, the two exceeded this machine's 43GB of RAM and the kernel OOM-killed
-`flm.service` outright — three times in 15 hours — breaking whatever OpenCode/Continue request
 (often a file-creation tool call, which needs more working memory than a short reply) was
 in flight. Caddy was just relaying a crashed backend's error faithfully.
 
@@ -2434,30 +2331,23 @@ in flight. Caddy was just relaying a crashed backend's error faithfully.
   a 6GB floor on `psutil.virtual_memory().available`) wired into all five backends' load paths
   in `app.py`. Unlike the existing per-backend size checks (`lemonade_client`/`vllm_client`'s
   `check_safe_to_load()`, which only compare a model's own file size against *total* RAM and
-  can't even evaluate NPU/flm models at all — bare tags like `"qwen3.6-moe:35b-a3b"` have no
   Hugging-Face-repo shape to size), this catches "something else already loaded a lot"
   regardless of cause. Also added `kobold_client.check_safe_to_load()` (its first pre-flight
   check ever, sized from the local GGUF file already on disk — no HF lookup needed).
-- `flm_tool_shim.py` hardened to evict any Lemonade-loaded NPU model before forwarding to
-  FastFlowLM — closes the direction that actually broke, since it's the one thing genuinely
-  inline for real FastFlowLM LAN traffic (app.py's own `_free_npu_except()` only runs for
   loads triggered through this app's own UI/API, which a direct LAN request never touches).
 - **The reverse direction** — confirmed by manually reproducing the OOM live — needed a
   second shim: Lemonade auto-loads a model on demand the same way LM Studio's JIT loading
   does, and nothing intercepted *that*. New `lemonade_guard_shim.py`
   (`lemonade-guard-shim.service`, `127.0.0.1:13306`) sits between Caddy's `:8444` and
-  Lemonade's raw server: for any chat request naming an NPU model, it stops `flm.service`
   first, then forwards unmodified — everything else (embeddings, Whisper, non-NPU chat
   models) passes straight through. Caddy's `:8444` now points here instead of Lemonade
   directly. `help_data.py`'s `_UPSTREAM_BACKEND` and both of `app.py`'s port maps
   (`_read_caddy_info`, `_CADDY_UPSTREAM`) were updated to recognize port 13306 as "lemonade"
-  too — the same dual-port pattern already used for the FastFlowLM shim's 52625/52626 — so
   the Help panel, Settings page, and per-user token snippets stayed correct with no other
   changes needed (confirmed live via `help_data.build()`).
 - Re-verified end to end after each change: a real `write`-tool-call request through Caddy's
   `:8447` came back with a correct `tool_calls` response and no crash; the reverse collision
   was deliberately re-triggered once more through the new guard shim and confirmed
-  `flm.service` now stays untouched throughout Lemonade's own load.
 
 Also opened the UDP firewall ports Caddy's HTTP/3 (`Alt-Svc: h3=...`, on by default) needs on
 every LAN port, not just the one that happened to already have it: `ufw allow 8443/udp`,
@@ -2466,27 +2356,22 @@ pre-existing UDP rules. TCP was never blocked, so this doesn't fix a hard failur
 that attempt HTTP/3 on those four ports were silently falling back to HTTP/2 rather than
 failing to connect — but it closes an inconsistency with no reason to exist.
 
-### Follow-up: the metrics page's live activity feed can now see OpenCode/Continue traffic through Lemonade and FastFlowLM
 
 The Performance metrics board's live-activity feed (see that section above) was built as
 webui-chat-only because LAN traffic normally has no code path that reads a streaming body —
 Caddy's raw `reverse_proxy` just pipes bytes through untouched. That stopped being fully true
-the moment `flm_tool_shim.py` and `lemonade_guard_shim.py` started existing: both are real
 Flask processes sitting inline for every OpenCode/Continue request to their backend, and
-`flm_tool_shim.py` already parsed every SSE chunk anyway (for its degeneracy check).
 
 New `live_report.py` — a thin client the shims use to call three new internal, localhost-only
 routes on the main app (`/api/internal/live/start`/`update`/`finish`, gated by
 `request.remote_addr`, not `admin_required` — the shims have no session of their own) that
 forward straight into the existing `live_requests.py` registry. Each shim's `tee()` now parses
 every `data:` line for `content`/`tool_calls` text (throttled to one update per ~20 characters,
-not per SSE chunk, since FastFlowLM in particular streams many small chunks/sec and the feed
 only needs to look like it's moving) and reports start/update/finish exactly like the webui's
 own chat worker does — including swapping in a real `completion_tokens` figure from a trailing
 `usage` object when the backend sends one, same as the webui path.
 
 **A real bug caught during verification**: the first version only called `finish()` at the
-normal end of the generator — an upstream connection failure (confirmed live: `flm.service`
 mid-restart after an eviction) raised before reaching it, leaving that request stuck showing
 "streaming" in the feed forever, since `live_requests.py`'s registry has no independent
 timeout for active entries. Fixed with a `try`/`finally` around both the initial `requests.post`
@@ -2529,7 +2414,6 @@ symptoms of connecting to the models").
 
 **A real regression, found and fixed**: `app.py`'s `/api/models/load` Lemonade branch still
 had `context_length=body.get("context_length") or 32768` — a leftover fallback from before the
-context ceiling was raised to 65536 everywhere else (`help_data.py`'s `_CTX`, `flm.service`'s
 `--ctx-len`, `recipe_options.json`'s stored `ctx_size`). An explicit `context_length` passed to
 `load_model()` overrides whatever `recipe_options.json` has stored, so *every* load through this
 app's own UI/API — not just ones requesting a custom context — was silently reloading the model
@@ -2570,7 +2454,6 @@ panel toggled from the chat header, the last major admin surface that hadn't mad
 real page. New `GET /settings` (`templates/settings.html` + `static/settings.js`, admin-only via
 the same `admin_required` decorator as the rest), reorganized into the same `console-grid`/
 `console-card` layout every other console page uses instead of one long scrolling form — one
-card per backend (LM Studio, Lemonade, vLLM, KoboldCPP, FastFlowLM), one for the "Default LAN
 model" dropdown, one for the read-only Caddy info. All existing content, copy, and behavior
 carried over unchanged (connection tests, Caddy tests, the save flow) — this was a structural
 move, not a rewrite.
@@ -2755,13 +2638,9 @@ page and `/api/settings` no longer reference the removed toggle anywhere.
 
 ## "OpenCode terminated due to error" — a malformed abort chunk when the NPU model degenerates
 
-Root-caused a real report by reading three logs in parallel (`flm.service`'s raw NPU log,
-`flm-tool-shim.service`'s access/error log, and the live-activity feed): a long OpenCode agentic
-session on the FastFlowLM NPU model (`qwen3.6-moe:35b-a3b`) ran a single tool call (an `edit`
 argument) for 3325 completion tokens at ~7.3 tok/s (~7.6 minutes) — well into that, the model's
 output degenerated into meaningless ASCII word-salad (confirmed: 243 consecutive alphabetic
 characters, zero vowels among them, vs. ~41% vowels in a same-length span of the real code a few
-lines earlier). `flm_tool_shim.py`'s existing reactive degeneracy guard (`_looks_degenerate()`,
 added  for a different, CJK-repetition failure mode) correctly caught this too — the
 low-character-diversity check it already had (≤15 distinct characters in a trailing 300-char
 window) fires on this word-salad pattern as well, confirmed by replaying the exact captured text
@@ -2770,14 +2649,11 @@ against the live function. So the guard *did* fire and sent a graceful synthetic
 client-side error right after.
 
 Found the actual gap: that synthetic `_abort_chunk()` had hardcoded `"model":
-"qwen3.6-moe:35b-a3b"` (wrong for any other FastFlowLM model) and didn't set `created` at all.
 The Vercel AI SDK's openai-compatible provider — what OpenCode's generated config uses — 
 validates each streamed chunk against a schema; a chunk with a missing `created` timestamp
 and/or a `model` field that doesn't match what was actually requested is a plausible trigger for
 exactly this kind of client-side crash immediately after an otherwise well-formed abort.
 
-**Fix:** `_abort_chunk()` now takes the request's own (already-`flm/`-prefix-stripped) `model`
-value and sets a real `created = int(time.time())`, matching what a normal FastFlowLM/OpenAI
 chunk looks like. Considered also tightening `_looks_degenerate()` further (e.g. a vowel-ratio
 check) but decided against it — vowel-sparse text is also completely normal in real code (UUIDs,
 hashes, base64 blobs, URLs), so that signal risks false-positives the existing character-
@@ -2786,7 +2662,6 @@ correctly, so the schema fix was the actual gap worth closing.
 
 Verified live: `_abort_chunk()` now round-trips through a direct call with a real model id and
 produces valid JSON with a nonzero integer `created` and the correct `model`; restarted
-`flm-tool-shim.service` (confirmed no in-flight connections on :52625/:52626 first, so nothing
 was interrupted) and re-verified `GET /v1/models` through Caddy's `:8447` still returns the full
 catalog normally.
 
@@ -2795,23 +2670,16 @@ catalog normally.
 Real gap while debugging the incident above: nothing in the app could actually say whether a
 given request ran on the NPU. `lemonade_guard_shim.py` already had this logic buried in its own
 eviction check (`_is_npu_model()`, querying Lemonade's `/v1/models?show_all=true` for
-`recipe == "flm"`), but it wasn't exposed anywhere. Also confirmed a real trap while building
 this: a Lemonade model literally named `Atomic-Germ-Qwopus3.5-9B-Coder-NPU` turned out to be
-recipe `llamacpp`, not `flm` — a plain GGUF model, not actually NPU-backed despite the name.
-Lemonade multiplexes several recipes (llamacpp, flm, whispercpp, kokoro, sd-cpp, vllm...) behind
 one API, so "is this Lemonade request on the NPU" can only be answered from the catalog's real
 `recipe` field, never guessed from a model's display name.
 
 **Added `lemonade_client.npu_model_ids()` / `is_npu_model()`** — a 60s-TTL-cached set of the
-catalog's actual flm-recipe ids (TTL, not permanent, since the catalog changes as models are
 downloaded/deleted — unlike `npu_tops_max()`'s one-time hardware-spec cache right above it).
 
 **Real-time ("streaming can show NPU being used or not")**: every place that already reports
 into the live-activity feed now tags each entry with a plain `is_npu` boolean, computed once at
-request-start where the context to answer it already exists — `flm_tool_shim.py` always passes
-`True` (FastFlowLM is NPU-only, no lookup needed), `lemonade_guard_shim.py` reuses the
 `_is_npu_model()` check it already runs for eviction, and app.py's own webui-chat path checks
-`backend is fastflowlm or (backend is lemonade and lemonade.is_npu_model(model))`. Threaded
 through `live_requests.start()` → `live_report.start()` → the `/api/internal/live/start` route
 → `snapshot()`'s per-row output, plus a new `live_requests.npu_busy()`. The metrics page now
 shows a live "⚡ NPU busy" / "NPU idle" badge next to "Live activity" (derived client-side from
@@ -2821,8 +2689,6 @@ individual streaming row.
 **Historical ("add metrics for NPU usage")**: `request_metrics` gained an `is_npu` column
 (migrated via the same `ALTER TABLE` + `try/except OperationalError` pattern chat_store.py
 already uses for its own post-launch columns) — `1` confirmed NPU, `0` confirmed not, `NULL`
-unknown. webui-chat rows get the exact same computed boolean as the live feed. FastFlowLM LAN
-rows (via `caddy_metrics.py`'s Caddy-access-log tailer) get `True` unconditionally — FastFlowLM
 is NPU-only regardless of which model was requested, so this needs no body access. Lemonade LAN
 rows stay `NULL`/unknown on purpose: `caddy_metrics.py` never sees the request body (Caddy's
 access log has no model id in it), and guessing `False` there would silently undercount real NPU
@@ -2831,8 +2697,6 @@ row gained an "NPU-served" count with a percentage computed against known-answer
 against total requests, for the same undercounting reason), and the Recent Requests table gained
 an "NPU" column.
 
-Verified live end-to-end: a real streaming FastFlowLM request showed `is_npu: true` in
-`/api/metrics/live` while in flight; a fresh FastFlowLM LAN poll recorded `is_npu: 1` in
 `request_metrics` (old pre-fix rows correctly stayed `NULL`, not retroactively changed); a real
 webui-chat turn against a genuine NPU model (`QwenFLM06B`, confirmed via `is_npu_model()`)
 recorded `is_npu: 1` end-to-end through the same code path used for the historical KPI.
@@ -2841,7 +2705,6 @@ recorded `is_npu: 1` end-to-end through the same code path used for the historic
 
 Real complaint: NPU model responses feel slow for OpenCode/Continue coding sessions. Investigated
 whether any "parallel token processing" feature exists to speed up NPU decoding specifically —
-it doesn't. `flm-real serve --help` (FastFlowLM, the actual NPU engine) has no speculative-
 decoding, batching, or parallel-slot flags at all; autoregressive decode on the NPU is inherently
 sequential, and there's no lever to change that. That's a hardware+engine ceiling, not a missing
 setting — confirmed by reading the actual CLI surface rather than assuming.
@@ -2871,7 +2734,6 @@ from the pairing "sounding right." Switched to Qwen3-8B + Qwen3-0.6B (confirmed 
 `vocab_size: 151936` via each model's `config.json` before downloading anything else) — loaded
 cleanly with no warning, both fully offloaded (37/37 and 29/29 layers) to Vulkan.
 
-**Measured live, isolated** (`flm.service` stopped during the test to remove NPU/RAM
 contention, via `/api/extra/perf`'s real per-request stats, not a guess): plain Vulkan decode
 (no draft model) — **4.33 tok/s**; with speculative decoding — **5.11 tok/s** at an 83%
 draft-token-acceptance rate (`last_draft_success: 327` vs `last_draft_failed: 67`). A genuine,
@@ -3012,12 +2874,10 @@ on demand when their features are used. Set it back to `true` to restore warm-up
 
 ### OpenCode file tools and project discovery
 
-Generated `flm-small` agents read project instructions, README, imports, and relevant
 source before editing. File edits are allowed; shell commands still ask for approval.
 The installed agent can be updated by re-copying Help's OpenCode configuration and
 running `opencode reload`, then starting a fresh session.
 
-The FLM proxy follows the request's tool schemas: OpenCode 2 uses `path`, older
 clients may use `filePath`, and `apply_patch` embeds paths in `patchText`. Edit
 aliases such as `old_string` are normalized only when the offered schema calls
 for `oldString`. Empty runtime tool calls finish as text rather than triggering
@@ -3030,15 +2890,12 @@ runs. Use a stronger coding model for reliable work across a project.
 
 Qwen3 8B uses JSON objects inside `<tool_call>` tags, matching its installed
 tokenizer template; the older XML `<function=...>` instructions belong to other
-FLM model families. The proxy selects this format by model and adds `/no_think`
 to the latest user message when Qwen3's thinking mode is disabled, because that
 runtime ignores the template keyword alone. Explicit thinking preferences remain
 supported.
 
-Run the live FLM model checks after loading the target model:
 
 ```bash
-.venv/bin/python tools/test_flm_model.py --model qwen3-it:4b --suite all --output /tmp/flm-results.json
 ```
 
 This checks chat, streaming, tool choices and arguments, follow-up results/errors,
@@ -3058,7 +2915,6 @@ text continues streaming as it arrives.
 
 Tool argument parsing recovers a complete JSON object followed only by redundant
 closing brackets/braces. It rejects extra JSON values, trailing text, markup and
-incomplete objects. If FLM's native streaming parser emits only
 `[Error parsing tool call]` and no structured call, Hearth makes at most one
 non-stream recovery request with a 90-second timeout, retaining the NPU lock.
 Recovered calls still pass schema and unsafe-command guards before being
@@ -3095,16 +2951,13 @@ workflows continue. These are scripted protocol/continuation tests with explicit
 next-step instructions, not proof that a model can autonomously build arbitrary
 large software. Tool results, delegated task results, permission decisions and user
 answers are simulated; a successful run does not claim real tests were executed.
-The suite has 113 checks for FLM (111 for other backends). Long models can take
 considerably longer than the earlier single-turn suite.
 
 Run only these scenarios from the CLI with `--suite opencode`, for example:
 
 ```bash
-.venv/bin/python tools/test_flm_model.py --model qwen3.8-mtp:27b --context 8192 --suite opencode
 ```
 
-The blocked-shell guard check applies to the FLM proxy. Test payloads never execute
 model-generated tools, change a real project, or send messages to connected accounts.
 
 Runs require an administrator and CSRF protection. Local models use the existing
@@ -3121,7 +2974,6 @@ shrinks without regressions; otherwise it is rolled back. Original attempts and
 rollback markers remain in the report. Already-applied recipes are not retried
 indefinitely. Model capability gaps and unsupported runtime features are reported
 as unresolved, never hidden by weaker assertions or arbitrary generated code edits.
-Profiles apply to Hearth backend clients and local FLM/LM Studio/Lemonade proxies;
 clients talking directly to external servers need corresponding configuration.
 Reset repair removes the persisted `tool_test_profile:<backend>:<model>` setting.
 
@@ -3193,9 +3045,7 @@ and phrasing cases), and simulated end-to-end runs through the actual shim chain
 duplicate-question, multi-file-read, and checkpoint-resume shapes in both response modes.
 
 
-### Qwen3.8 FLM context and output budgets
 
-Qwen3.8-27B on the installed FLM v1.0.8 NPU engine uses an 8,192-token combined
 context and now permits up to 4,096 output tokens (previously 2,048). The proxy,
 Hearth client, and generated OpenCode `limit.output` agree on this budget. Explicit
 smaller requests remain smaller. Long prompts reduce the output budget to fit,
@@ -3214,7 +3064,6 @@ this NPU restriction; a compatible engine/kernel update is needed for larger inp
 
 ### OpenCode question compatibility and validation diagnostics
 
-The FLM and Lemonade proxies normalize OpenCode `question` calls: an omitted
 optional `multiple` becomes `false`, and options labelled `(Recommended)` move
 first without changing labels or descriptions. Explicit multiple-selection
 requests stay unchanged. Lemonade applies this to non-streaming completions and
@@ -3259,11 +3108,8 @@ goal, acceptance criteria, and configured local OpenCode model. An optional chec
 creates a missing project directory. Assignment authorizes actual project file edits.
 Qwen3 4B Instruct is initially selected when configured; model context/capability limits
 still apply. This worker needs at least 16K context: the measured fixed prompt/tool
-overhead was about 10K tokens, so smaller models (including the current 8K FLM
 Qwen3.8 runtime) are disabled instead of starting a job that cannot fit.
-A healthy FLM model that is already serving the assignment is reused. Other
 selections use Hearth's normal serialized load path before execution, including
-clearing a prior FLM manual-unload state.
 
 `agent_tasks.py` supervises durable OpenCode v2 sessions through `agent_opencode.py`.
 The managed `hearth-worker` agent plans, reads, edits, uses tools, verifies, and reports.

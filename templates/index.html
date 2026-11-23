@@ -83,12 +83,10 @@
           <p class="hint">
             Connect an AI coding tool (Continue, OpenCode) running on another PC on this network to
             a model served on this machine. LM Studio, Lemonade (Ryzen AI NPU), vLLM,
-            KoboldCPP, and FastFlowLM use their own Caddy reverse-proxy ports for
             authenticated remote access; q38rocm is local to this desktop. These services do not
             expose unauthenticated model endpoints on the network. Each Caddy route in
             <code class="inline-code">/etc/caddy/Caddyfile</code> enforces a bearer token:
             <strong>port {{ help.ports.lmstudio }}</strong> for LM Studio, <strong>port {{ help.ports.lemonade }}</strong> for Lemonade, <strong>port {{ help.ports.vllm }}</strong> for vLLM,
-            <strong>port {{ help.ports.kobold }}</strong> for KoboldCPP, <strong>port {{ help.ports.fastflowlm }}</strong> for FastFlowLM (the Ryzen AI NPU
             runtime run standalone).
             They all share the same CA cert below (Step 1), but
             OpenCode and Continue each get their own dedicated bearer token (not a shared
@@ -111,12 +109,9 @@
             the same output budget. The proxy preserves your requested token cap.
           </p>
           {% if agentic_workflow_enabled %}<p class="hint"><strong>Persistent agents:</strong> open <a href="{{ url_for('agents_page') }}">Agents</a>, assign a goal, acceptance criteria and model, then start. Each account has a private project workspace. Work continues after closing the browser and reconnects after llama-web restarts. Answer questions and permissions on the Agents page; pause or stop at any time. Supply a verification command for independently checked completion. Without one, completion is agent-reported. Cycle limits and repeated blockers require review and Resume.</p>{% endif %}
-          <p id="help-flm-status" class="hint">{{ help.flm_status }}</p>
           <p class="hint">
             Generated client context limits follow each model's runtime or configured context,
-            with model-specific FastFlowLM limits where known. The inventory above shows the
             current values reported by llama-web. Input and output share the context window. For
-            OpenCode, select <code class="inline-code">flm-small</code> to reduce tool overhead;
             refresh Help and re-copy the generated configuration after changing available models.
           </p>
           <p class="hint">
@@ -175,10 +170,7 @@
             vLLM search their curated catalogs plus Hugging Face; LM Studio and KoboldCPP search the
             public Hugging Face GGUF index (both install GGUF repos — LM Studio via
             <code class="inline-code">lms get</code>, Kobold by fetching the <code class="inline-code">.gguf</code>
-            and auto-picking a quant); FastFlowLM searches its own fixed NPU catalog
-            (<code class="inline-code">flm list</code>), showing each model's real on-NPU size and
             whether it's already downloaded. Every result shows a size before you commit to the
-            download. LM Studio and FastFlowLM also keep a by-exact-name/tag box for when you already
             know the id.
           </p>
           <p class="hint">
@@ -539,10 +531,7 @@
           </details>
 
           <details class="advanced">
-            <summary>FastFlowLM coding: Qwen3 8B and tool compatibility</summary>
             <p class="hint" style="margin-top: 8px;">
-              Connect through the authenticated FastFlowLM endpoint on port
-              {{ help.ports.fastflowlm }} using the generated configuration above.
               MiniCPM-V-4.7 1B supports automatic, required, and named-function tool choices,
               parallel calls, and follow-up answers using tool results, in both streaming
               and non-streaming requests. Use <code class="inline-code">tool_choice: none</code>
@@ -551,8 +540,6 @@
             </p>
             <p class="hint">
               <strong>Qwen3 8B for coding:</strong> select
-              <code class="inline-code">fastflowlm/flm/qwen3:8b</code> with the
-              <code class="inline-code">flm-small</code> agent in OpenCode. The proxy sends
               JSON tool calls inside <code class="inline-code">&lt;tool_call&gt;</code>
               tags, matching this model's template. When thinking is disabled, it adds
               <code class="inline-code">/no_think</code> to the latest user message;
@@ -567,16 +554,13 @@
               unrelated text. File-tool arguments follow each client's schema, including
               <code class="inline-code">path</code>, <code class="inline-code">filePath</code>,
               and patch paths embedded in <code class="inline-code">patchText</code>. Empty
-              runtime calls finish as text instead of crashing the client. Generated FLM
               configurations advertise model-specific context
               limits and an output cap of up to 4,096 tokens for Qwen3.8
-              (up to 2,048 for other FLM models). Reply budgets shrink when long inputs need the space.
             </p>
             <p class="hint">
               Refresh Help and re-copy the configuration after changing the active model or
               runtime, run <code class="inline-code">opencode reload</code>, and start a fresh
               session to avoid carrying earlier tool failures forward. Blocked tool operations end the turn with an explanation; revise the
-              request before continuing. A manual FLM unload blocks automatic retries until
               a model is loaded again.
             </p>
           </details>
@@ -586,11 +570,8 @@
             <p class="hint" style="margin-top: 8px;">
               Lemonade auto-loads a model on demand when a chat request names one that isn't
               loaded yet (the same just-in-time behavior LM Studio has). When that model is an
-              flm-recipe (NPU) one, Lemonade starts its own independent copy of FastFlowLM's
               engine — completely separate from the standalone
-              <code class="inline-code">flm.service</code> the tool-calling shim above sits in
               front of — and the two loaded at once can exceed this machine's RAM. Confirmed
-              live: reproducing it OOM-killed <code class="inline-code">flm.service</code>
               outright, breaking whatever OpenCode/Continue request it was serving mid-generation
               — this is what "file creation keeps failing" traced back to. Caddy itself was never
               the problem; it was faithfully relaying a crashed backend's error.
@@ -602,12 +583,10 @@
               <code class="inline-code">127.0.0.1:13306</code>) sits between Caddy's
               <code class="inline-code">:{{ help.ports.lemonade }}</code> and Lemonade's raw
               server: for any chat request naming an NPU model, it stops
-              <code class="inline-code">flm.service</code> first, then forwards the request
               unmodified — every other request (embeddings, Whisper, Lemonade's own non-NPU chat
               models) passes straight through untouched. Caddy's
               <code class="inline-code">:{{ help.ports.lemonade }}</code> block now points at this
               shim instead of Lemonade directly. Verified live: manually reproduced the exact
-              collision (it OOM-killed <code class="inline-code">flm.service</code> again), then
               confirmed the shim stops it cleanly beforehand and the same request completes with
               no crash.
             </p>

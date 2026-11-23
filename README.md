@@ -25,80 +25,35 @@ cookie name, help/config generation, and the Tailscale certificate command.
 
 | Area | Capabilities |
 |---|---|
-| Chat | Streaming, saved conversations, remembered model selection, attachments, Markdown, inline charts, and HTML previews |
-| Model management | Search supported catalogs and Hugging Face, download and upload supported models, load or unload local models, and configure per-model context and reasoning preferences |
-| Model evaluation | Compatibility and tool-use checks, reasoning and safety evaluations, saved reports, and user-managed test scenarios |
+| Chat | JavaScript-driven streaming, saved conversations, regenerate, edit, and delete chats, remembered model selection, attachments, Markdown, and code blocks |
+| Model management | List downloaded GGUF models, load a model, set its context size, and see each model's maximum supported context on its label |
 | Coding agents | OpenCode tasks, live progress, workspace checkpoints, verification commands, schedules, and reusable skills |
 | Research and memory | Web search and browser-based page retrieval, searchable browse history, and cross-chat recall using local embeddings |
 | Voice and translation | Microphone transcription, spoken replies, and supported local text, image, and video translation workflows |
-| Image and video | Local image generation through Lemonade and Anima-Turbo; text-to-video with Wan 2.2 through Lemonade's bundled sd.cpp runtime |
-| Hosted models | Optional opencode.ai catalog access for chat and agent assignments |
 | Coding clients | Authenticated OpenAI-compatible endpoints and generated configurations for OpenCode, Continue, and compatible clients |
-| Monitoring and learning | Live logs, request metrics, system stats, quizzes, and DMV practice tests |
-| Administration | User accounts and roles, backend settings, service controls, and host security reports |
+| Administration | User accounts and roles, backend settings, service controls, and live logs |
 
-Feature availability depends on the configured runtime, installed models, and host
-hardware. See the [installation guide](deploy/FIRST_TIME_INSTALL.md) for prerequisites
+Feature availability depends on the installed models, host hardware, and configured
+runtime. See the [installation guide](deploy/FIRST_TIME_INSTALL.md) for prerequisites
 and operational details.
 
 ## Architecture
 
-Hearth provides the web interface and coordinates supported inference backends. It
-stores application data in PostgreSQL and keeps model execution in the selected local
-runtime or optional hosted provider.
+llama-web provides the web interface and coordinates the local llama.cpp engine. It
+stores application data in PostgreSQL and keeps model execution in the local runtime.
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="Hearth web app connected to local and hosted model backends, coding agents, and PostgreSQL" width="100%">
+  <img src="docs/architecture.svg" alt="llama-web web app connected to the llama.cpp engine and PostgreSQL" width="100%">
 </p>
 
 ## Supported model backends
 
 | Backend | Typical use | Notes |
 |---|---|---|
-| [LM Studio](https://lmstudio.ai) | Local chat and GGUF models | CPU or GPU execution supported by the installed runtime |
-| [Lemonade](https://github.com/lemonade-sdk/lemonade) | Local chat, speech, image, and video models | Supports compatible CPU, GPU, and Ryzen AI NPU recipes |
-| [vLLM](https://github.com/vllm-project/vllm) | Local model serving | Connect Hearth to a configured vLLM OpenAI-compatible endpoint |
-| [KoboldCPP](https://github.com/LostRuins/koboldcpp) | Local GGUF chat models | CPU or GPU execution supported by the installed build |
-| [FastFlowLM](https://github.com/ROCm/FastFlowLM) | Ryzen AI NPU chat models | Runs as a separate host service |
-| q38rocm | Qwen 3.8 local inference | Optional Radeon Vulkan backend; see the setup guide |
-| [opencode.ai](https://opencode.ai) | Optional hosted chat and coding models | Account and plan access are managed by the provider |
+| llama.cpp (`llama-server`) | Local chat and GGUF models | Serves models from the configured model directory on port 18473 |
 
 Check each model's license and hardware requirements before downloading. See the
-[installation guide](deploy/FIRST_TIME_INSTALL.md) for backend configuration.
-
-### Observed local model speeds
-
-These are peak successful generation speeds recorded by this Hearth installation
-through **November 18, 2026**, on an AMD Ryzen AI 9 HX 470 system with Radeon 890M
-graphics, 12 CPU cores / 24 threads, and 43.7 GiB RAM. They are observations from
-different prompts, context sizes, quantizations, and backend settings. Samples count
-successful local measurements.
-
-| Backend | Model | Peak recorded speed (tokens/s) | Samples |
-|---|---|---:|---:|
-| FastFlowLM | `llama3.2:1b` | 51.00 | 106 |
-| FastFlowLM | `minicpm-v-4.7:1b` | 40.80 | 270 |
-| FastFlowLM | `qwen3.5:2b` | 22.70 | 244 |
-| FastFlowLM | `qwen3.8-mtp:27b` | 4.30 | 278 |
-| KoboldCPP | `Qwen3.8-2B-Q8_0` | 19.10 | 274 |
-| Lemonade | `Devstral-Small-2507-GGUF` | 2.80 | 475 |
-| Lemonade | `esatapedico-Qwen3.8-27B-NVFP4-MTP-GGUF` | 7.10 | 1,259 |
-| Lemonade | `Gemma-4-26B-A4B-it-GGUF` | 10.30 | 500 |
-| Lemonade | `Gemma-4-26B-A4B-it-MTP-GGUF` | 18.80 | 500 |
-| Lemonade | `GLM-4.7-Flash-GGUF` | 14.70 | 876 |
-| Lemonade | `granite-4.0-h-tiny-GGUF` | 29.80 | 224 |
-| Lemonade | `K2-Horizon-32B-GGUF` | 1.91 | 268 |
-| Lemonade | `K2-Horizon-MoVA-36B-A4B-GGUF` | 10.90 | 1,492 |
-| Lemonade | `mradermacher-Moon-Beam-16B-A3B-i1-GGUF` | 21.10 | 333 |
-| Lemonade | `Muse-Glimmer-30B-GGUF` | 8.00 | 1,844 |
-| Lemonade | `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF` | 17.60 | 387 |
-| Lemonade | `Ornith-1.5-35B-A3B-GGUF` | 19.30 | 214 |
-| Lemonade | `Ornith-1.5-9B-GGUF` | 16.40 | 531 |
-| Lemonade | `PhillyLabs-KAT-Coder-V2.5-Dev-35B-A3B-ABLITERATED-UNCENSORED-PHILADELPHIA-CLASS` | 14.90 | 575 |
-| Lemonade | `PhillyLabs-Qwen3.8-27B-ABLITERATED-UNCENSORED-PHILADELPHIA-CLASS` | 2.30 | 259 |
-| LM Studio | `mimo-v2.6-distill-qwen-9b` | 7.11 | 200 |
-| LM Studio | `qwen3.8-2b-distill` | 29.70 | 479 |
-| q38rocm | `Qwen3.8-27B-Q3_K_M` | 2.80 | 538 |
+[installation guide](deploy/FIRST_TIME_INSTALL.md) for runtime configuration.
 
 ## Screenshots
 

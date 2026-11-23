@@ -104,7 +104,6 @@
     { key: "opencode", label: "opencode.ai (remote)" },
     { key: "kobold", label: "KoboldCPP" },
     { key: "q38rocm", label: "q38rocm (Qwen 3.8 27B)" },
-    { key: "fastflowlm", label: "FastFlowLM (NPU)" },
     { key: "wan22", label: "Video generation" },
   ];
   const LABEL = Object.fromEntries(GROUPS.map((g) => [g.key, g.label]));
@@ -134,7 +133,6 @@
     toastEl.style.borderColor = isErr ? "var(--danger)" : "var(--border)";
     clearTimeout(toastTimer);
     // persist=true skips the auto-hide — used for long-running ops (a cold vLLM/KoboldCPP/
-    // FastFlowLM service start can take 60-90+s) so the message doesn't vanish after 4s and
     // leave the page looking idle/hung for the rest of the wait. Real user report: a working
     // 91s vLLM cold-start looked exactly like a failure because of this — the toast disappeared
     // almost immediately and nothing else in the UI changed until the request finally resolved.
@@ -333,7 +331,6 @@
       actions.appendChild(box);
     }
     // Disabled (not just hidden) while this specific card has an operation in flight, so a
-    // slow cold-start (vLLM/KoboldCPP/FastFlowLM can take 60-90+s) can't be double-clicked
     // into a second, conflicting request — the card visibly shows why the buttons are inert
     // instead of just silently no-op'ing like the old `busy` guard alone did.
     if (isWanVideoModel) {
@@ -565,7 +562,6 @@
     }
   });
 
-  // Cold-starting an on-demand backend's service (vLLM/KoboldCPP/FastFlowLM) can take 60-90+s
   // (confirmed live: a working vLLM cold-start took 91s). Real user report: this looked exactly
   // like a failed load, because the old code showed one static toast that auto-hid after 4s and
   // never touched the card again until the whole request finished — nothing on the page visibly
@@ -591,11 +587,9 @@
     busyLabel = "";
   }
 
-  // vLLM/KoboldCPP/FastFlowLM only run while a model is loaded — no model of theirs currently
   // "loaded" means the service itself is stopped, so loading one starts it from cold (confirmed
   // live: vLLM took 91s). LM Studio/Lemonade are always-on processes, so there's no service to
   // start for them — only the on-demand three ever need this extra warning.
-  const ON_DEMAND_BACKENDS = new Set(["vllm", "kobold", "q38rocm", "fastflowlm"]);
 
   async function loadModel(modelKey) {
     if (busy || window.llamaWebModelTests?.isRunning()) return;
@@ -648,9 +642,7 @@
     if (busy || window.llamaWebModelTests?.isRunning()) return;
     const target = models.find((m) => m.id === id)?.backend;
     // For the on-demand backends, "unload" isn't just freeing RAM — vllm_client/kobold_client/
-    // fastflowlm_client's unload_model() all stop the whole systemd service (confirmed by
     // reading each one directly), since that's the only way vLLM/KoboldCPP work and how
-    // FastFlowLM releases the NPU. So unloading here means the *next* Load on this backend is a
     // full cold start again (~1-2 min), not instant — worth surfacing before it happens, same
     // reasoning as the cold-start warning added to loadModel() above.
     const lines = [`Unload ${id}?`];
@@ -687,7 +679,6 @@
     const m = models.find((mm) => mm.id === id);
     const lines = [`Permanently delete "${id}" from disk? Frees storage (and memory if loaded), but you'd need to re-download it.`];
     // Each backend's delete_model() unloads first if this is the one currently being served
-    // (confirmed by reading vllm_client/kobold_client/fastflowlm_client directly) — for the
     // on-demand three that means stopping the whole service too, same as a plain Unload does.
     if (m?.state === "loaded" && ON_DEMAND_BACKENDS.has(m.backend)) {
       lines.push(`It's currently loaded, so this also stops ${LABEL[m.backend] || m.backend}'s service first.`);

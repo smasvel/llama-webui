@@ -48,7 +48,6 @@
     filter.className = "download-tool-filters";
     filter.innerHTML = '<strong>Tool calling filters:</strong>' +
       '<label><input data-exclude-unknown-tools type="checkbox" /> Exclude unknown support</label>' +
-      [['lemonade','Lemonade'],['vllm','vLLM'],['lmstudio','LM Studio'],['kobold','KoboldCPP'],['fastflowlm','FastFlowLM'],['q38rocm','q38rocm']]
         .map(([key,label]) => `<label><input data-tools-backend="${key}" type="checkbox" /> ${label}</label>`).join("") +
       '<strong>Model size:</strong>' +
       [['small','Small (up to 4B)'],['medium','Medium (over 4B to 13B)'],['large','Large (over 13B)']]
@@ -83,7 +82,6 @@
 
   function trackDownload(backend, modelId) {
     currentDownload = { backend, model_id: modelId };
-    cancelBtn.classList.toggle("hidden", !["lmstudio", "vllm", "fastflowlm"].includes(backend));
     cancelBtn.disabled = false;
   }
 
@@ -230,7 +228,6 @@
   }
 
   // Generic backend search → cards. Used by LM Studio / KoboldCPP (both search the HF
-  // GGUF index server-side) and FastFlowLM (its own NPU catalog). Empty query browses each
   // backend's available catalog/popular Hugging Face results.
   async function searchBackend(query, { backend, container, input, onDownload, browseHint, emptyIsCatalog }) {
     container.innerHTML = `<p class="hint">Searching&hellip;</p>`;
@@ -255,9 +252,6 @@
     browseHint: "Search Hugging Face for a GGUF model to download.",
   });
   const searchFastflow = (q) => searchBackend(q, {
-    backend: "fastflowlm", container: npuResultsEl, input: npuSearchInput, emptyIsCatalog: true,
-    onDownload: (id, _src, btn, sizeGb) => downloadStructuredCard(id, "fastflowlm", btn, () => searchFastflow(npuSearchInput.value.trim()), sizeGb),
-    browseHint: "Search FastFlowLM's NPU catalog.",
   });
   const searchQ38 = (q) => searchBackend(q, {
     backend: "q38rocm", container: q38ResultsEl, input: q38SearchInput,
@@ -512,7 +506,6 @@
   }
 
   // Card "Download" for backends whose download yields structured byte-level progress
-  // (KoboldCPP, FastFlowLM) — same stream/render as downloadVllmModel, just generic over
   // backend, and refreshes the originating grid when done.
   async function downloadStructuredCard(query, backend, triggerBtn, refresh, sizeGb) {
     if (busy) return;
@@ -636,7 +629,6 @@
   // vLLM: empty query loads the curated suggestions (models vetted to load on vLLM),
   // shown first the way Lemonade's catalog is.
   searchVllm("");
-  // FastFlowLM has a fixed NPU catalog, so its empty query loads the whole thing to browse
   // (installed first). LM Studio / Kobold have no catalog — they wait for a search term.
   searchFastflow("");
   searchQ38(q38SearchInput.value.trim());
@@ -773,7 +765,6 @@
           const refreshers = {
             vllm: () => searchVllm(vllmSearchInput.value.trim()),
             kobold: () => searchKobold(koboldSearchInput.value.trim()),
-            fastflowlm: () => searchFastflow(npuSearchInput.value.trim()),
             lmstudio: () => searchLmstudio(lmSearchInput.value.trim()),
           };
           (refreshers[observingRemoteBackend] || (() => searchCatalog(searchInput.value.trim())))();
@@ -795,7 +786,6 @@
   setInterval(pollActiveDownloads, 2000);
   pollActiveDownloads();
 
-  // "New to Hearth?" banner: real gap this closes — Ryzen AI/vLLM/FastFlowLM already show
   // curated picks with no search needed, but a first-time user landing on this page had zero
   // indication of that, or of what to search for on LM Studio/KoboldCPP (which show nothing
   // until you type). Dismissible (localStorage) rather than tied to "zero models downloaded",

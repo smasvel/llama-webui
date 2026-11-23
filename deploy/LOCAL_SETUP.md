@@ -15,7 +15,6 @@ on port 5443. Other existing routes should be preserved.
 | --- | --- | --- |
 | Default chat and vision | Qwen3.5 4B, Q4_K_M, with BF16 vision projector | Chat response and apple recognition |
 | Lightweight chat / backend checks | Qwen3 0.6B, GGUF Q8_0 and Hugging Face weights | LM Studio, KoboldCPP and vLLM chat responses |
-| NPU chat | Llama 3.2 1B NPU2 | FastFlowLM chat response |
 | Memory | Nomic Embed Text v1 GGUF through Lemonade | 768-dimensional embedding |
 | Speech recognition | Whisper Tiny | Transcribed synthesized speech correctly |
 | Spoken replies | Kokoro v1, af_heart voice | Generated MP3 audio |
@@ -23,7 +22,6 @@ on port 5443. Other existing routes should be preserved.
 | Images | Anima-Turbo through Lemonade | Generated and visually checked a PNG; copy, share, and download actions |
 | Video | Wan 2.2 TI2V-5B Q4 through Lemonade's bundled sd.cpp | Downloads about 8 GB on first use; CPU fallback tested; copy-link, share, and download actions |
 
-Nomic Embed Text v1.5 is also installed for LM Studio. FastFlowLM exposes
 Gemma's flash variant from the same downloaded weights.
 
 ## PostgreSQL database
@@ -44,20 +42,15 @@ docker compose --env-file .env.postgres ps
 ## Runtime and services
 
 Hearth uses its existing Python 3.14 environment. vLLM and the generic
-FLM converter have separate Python 3.12 environments under
 `~/.local/share/hearth`. PyTorch and vLLM use CPU builds on this AMD machine.
-LM Studio and KoboldCPP have working GPU inference; FastFlowLM has working NPU
 inference with its system service's unlimited memory-lock allowance.
 
 Enabled user services: `ai-webui`, `lmstudio`,
-`lemonade-guard-shim`, `lmstudio-shim`, and `flm-tool-shim`. User lingering is enabled.
 Lemonade runs in the `lemonade-server` Docker container. `kobold`, `vllm` and the
-system `flm` service start when selected, rather than loading all chat models
 at once. The final selected default is `lmstudio/qwen/qwen3.5-4b` with a
 32,768-token context. Restarting Hearth preserves an already-loaded instance.
 
 FFmpeg, Chromium, Caddy, Lynis, Vulkan libraries, development tools and the
-FastFlowLM/XRT packages are installed. Browser and persistent Python MCP tools
 passed live calls. The narrow Lynis sudoers rule is configured for the application account.
 
 Authenticated Caddy backend ports:
@@ -68,7 +61,6 @@ Authenticated Caddy backend ports:
 | Lemonade | 8444 |
 | vLLM | 8445 |
 | KoboldCPP | 8446 |
-| FastFlowLM | 8447 |
 
 The app's Help page provides credentials and client configuration. These
 backend ports use Caddy's local CA; the browser app's Tailscale URL uses a
@@ -88,7 +80,6 @@ the sd.cpp runtime bundled in Lemonade; the model downloads on first use into th
 Hugging Face cache. CPU inference was verified; the integrated GPU's Vulkan workspace
 was insufficient. No hosted media provider is configured.
 
-The generic FLM converter is installed and its CLI works. The experimental
 custom 27B conversion feature remains unavailable: its project-specific
 `validate_profile.py` and validated kernel/ABI artifacts are not part of the
 upstream converter. Its readiness checks have not been bypassed.

@@ -2,8 +2,6 @@
 # Install (or refresh) the Hearth backend-control broker on the Hearth host.
 #
 # The broker lets the containerized Hearth app call host systemd units for vLLM,
-# KoboldCPP, q38rocm and FastFlowLM load/unload, and run the `flm` CLI on the host without the
-# container having systemd or the FastFlowLM binary installed. It binds to 127.0.0.1
 # only and requires a bearer token, and only accepts systemctl verbs Hearth already uses.
 #
 # Prerequisites: Docker Hearth already deployed with `bash deploy/install-docker.sh`

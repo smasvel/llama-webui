@@ -84,7 +84,6 @@ fi
 # key before enabling service.
 .venv/bin/python tools/first_time_setup.py "${setup_args[@]}"
 # Install the Docker backend-control broker so a containerized Hearth install can load
-# and unload the shared host backends (vLLM / KoboldCPP / FastFlowLM). The unit is
 # idempotent; pass --skip-backend-broker to opt out.
 if [[ $install_service -eq 1 ]]; then
   if [[ $install_backend_broker -eq 0 ]]; then

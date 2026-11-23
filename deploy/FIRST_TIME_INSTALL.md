@@ -474,14 +474,11 @@ the model's prior warning. This records provider signals; it does not automatica
 the assignment before the provider's stated time.
 
 Hearth chat exposes the configured Playwright browser and persistent Python MCP
-tools on KoboldCPP, FastFlowLM, opencode.ai, Lemonade, and LM Studio. The MCP servers
 start the first time chat needs them. Ordinary chat turns omit tool schemas; a turn
 that explicitly asks for browser or Python work receives only the relevant compact
 tool set, reducing local-model prompt prefill time. Tool-enabled requests use Hearth's
 local backend compatibility shims; keep the `lemonade-guard-shim`, `lmstudio-shim`, and
-`flm-tool-shim` user services running for those backends. Ask the model to use the
 browser for a specific page or task when you want a Playwright action. Hearth chat
-trims oversized FastFlowLM browser results so they fit more reliably within smaller
 model context windows. After navigation and requested page interactions, Hearth waits
 for content, lists and visits each open tab (including popups), captures snapshots, and
 returns an explicit confirmation to the model. The chat browser tools support navigation,
@@ -723,7 +720,6 @@ the work-cycle counter. Its first prompt is kept short and does not repeat proje
 verification instructions. A repeated overflow remains saved for review. When compaction fails,
 Hearth also retries in a fresh session from the saved project checkpoint without advancing
 the work-cycle counter.
-Streamed requests through the Lemonade, FastFlowLM, and LM Studio gateways send ordinary
 answer text during generation, even when tool schemas are present. The gateways still
 buffer tool calls for validation and repair; possible textual tool-call markup is held
 until validation. Other local backends stream directly unless a compatibility repair is
@@ -897,7 +893,6 @@ only auto/none/required choice strings. Change its URL in Settings only if you m
 Hearth requests the final streaming usage event so q38rocm prompt and completion
 token counts are included in Metrics.
 UI test runs resolve the live served model ID. For standalone checks run
-`.venv/bin/python -m tools.test_flm_model --backend q38rocm --url http://127.0.0.1:8008/v1/chat/completions --model '<served model ID>' --suite core`,
 using the ID from `/v1/models`. This uses the UI's adapter and bounded input
 fixture; full tool budgets can require several minutes on this GPU.
 Without `--url`, the q38rocm CLI uses the saved endpoint and API key. Deliberately
@@ -990,9 +985,7 @@ arguments for that function, Hearth preserves the requested call when the model
 returns prose or another function. It also converts supported model-native tool markup to
 structured calls only for functions offered in that request. An instruction not to
 repeat a question does not suppress a later explicit tool action in the same turn. The
-FastFlowLM `minicpm-v-4.7:1b` path has its own tool-use reminder and exact named-call
 handling. By default, it can perform up to six tool rounds for multi-step browser tasks, then
-requests a text-only summary of the results; other FastFlowLM models use their
 existing behavior. Administrators can set Hearth chat's maximum tool-call retries
 (rounds) per response under Settings (1–100, default 100); changes apply to the next chat request.
 When browser tools are available, Hearth adds their usage guidance to the leading system
@@ -1023,7 +1016,6 @@ actual served window of a loaded model and the saved value for an unloaded model
 Reload a loaded model to activate the saved maximum. This allows longer exact conversations on a
 large-window model. A larger window needs enough system or GPU memory, and a reload
 interrupts requests using that model.
-FastFlowLM retains its verified per-model NPU limits; increasing those without a
 supported kernel can prevent the model from loading. q38rocm uses the context
 installed in `q38rocm.service`; its 131,072-token desktop setting fits the GPU,
 while the native 262,144-token maximum exceeded the available allocation.
@@ -1047,8 +1039,6 @@ ROCm llama.cpp backend enables Hearth to select ROCm for these models on their n
 docker exec lemonade-server /opt/lemonade/lemonade backends install llamacpp:rocm
 ```
 
-If ROCm is unavailable, Hearth keeps the safe CPU backend. FLM Qwen models use the AMD
-NPU through Lemonade's FLM recipe and are configured separately from GGUF models.
 
 ```bash
 docker compose --env-file .env.postgres ps
@@ -1103,11 +1093,8 @@ The **Live logs** page also has **Clear my live logs**, which clears completed h
 captured request/response traces after two confirmation warnings. In-flight rows remain
 visible, keep their saved checkpoints, and are recorded after they finish. Interrupted entries
 are retained if Hearth restarts before a request completes.
-For Lemonade’s `qwen3.8-mtp-27b-FLM`, use an 8,192-token context in OpenCode Desktop. Hearth applies this kernel limit on load and in generated client configs.
 
-Standalone FastFlowLM starts with up to 65,536 context tokens, capped at the model’s supported kernel limit.
 
-For standalone FastFlowLM clients, route chat requests through the reporting shim on port 52626. Direct engine requests on port 52625 bypass live reporting.
 
 Live logs also include text search across request metadata and opened traces. Admins
 can kill active Hearth chat and agent relay requests from their rows. Requests handled
@@ -1117,14 +1104,12 @@ name and model; Hearth does not read or save their prompt body.
 If OpenCode closes a model response before it finishes, Live logs labels the row
 **CANCEL** and records that the client closed the stream, separately from an upstream
 model error. An agent's first-token timeout can close a stream this way.
-For streamed chat and model test requests, Hearth asks Lemonade, FastFlowLM, LM Studio, and KoboldCPP for
 token usage and records generated-token counts when the backend supplies them. On local
 KoboldCPP, Hearth also samples `/api/extra/perf` before and after each request. It accepts
 the last-request counts and decode speed only when KoboldCPP's generation counter advanced
 by exactly one, avoiding attribution of another concurrent request's global counters.
 Historical rows created without usage counts remain unknown. Tok/s values are decode speeds:
 Hearth uses the backend's own measured `decoding_speed_tps` when available (Lemonade and
-FastFlowLM), or KoboldCPP's correlated `last_eval_speed`; otherwise it falls back to
 completion tokens divided by request elapsed time (which includes prefill). Requests without
 a measurable speed show — rather than 0. KoboldCPP does not provide NPU utilization or TOPS
 through this endpoint, so those NPU-specific fields remain unavailable for Kobold requests.
@@ -1171,7 +1156,6 @@ when its recipe or OpenCode version changed, and restart the service:
 .venv/bin/python -m pip install -U -r requirements.txt
 bash deploy/install-first-time.sh --rebuild-agent-image
 systemctl --user restart ai-webui.service
-systemctl --user restart lemonade-guard-shim.service flm-tool-shim.service lmstudio-shim.service
 ```
 
 Use `-U` so security-fixed minimums in `requirements.txt` replace older installed
@@ -1196,7 +1180,6 @@ installations or install the other runtimes.
 | Lemonade | 2026.46.2 | [Lemonade releases](https://github.com/lemonade-sdk/lemonade/releases); pull the Docker `latest` image and restart the container |
 | vLLM | 0.33.0 CPU build | [vLLM releases](https://github.com/vllm-project/vllm/releases); keep the Hearth vLLM environment on the CPU wheel for CPU hosts |
 | KoboldCPP | 1.124.2 | [KoboldCPP releases](https://github.com/LostRuins/koboldcpp/releases); AMD hosts should use the Linux `nocuda` build with Vulkan support |
-| FastFlowLM | 1.0.13 | [FastFlowLM releases](https://github.com/ROCm/FastFlowLM/releases); install the package for the host Ubuntu release, then restart `flm.service` |
 | q38rocm | No numbered release; current upstream source plus Hearth's local Vulkan build adjustments | [q38rocm source](https://github.com/julianmb/q38rocm); update the checkout, then rebuild with `deploy/build-q38rocm-vulkan.sh` |
 
 LM Studio, Lemonade, and model-serving services can be running without a model
@@ -1311,17 +1294,10 @@ Deleting a Lemonade model removes its Hearth inventory entry even if another var
 still uses shared cache files. Download it again to restore the entry.
 On Linux hosts with AMD Ryzen AI NPU support, the installer passes
 `/dev/accel/accel0` and its owning group into the container when that device exists.
-It also sets `--ulimit memlock=-1:-1` and mounts `lemonade-flm` at
-`/opt/lemonade/.config/flm`, preserving existing FLM downloads during migration.
-The host NPU driver must be installed. Only Lemonade models that use the FLM/NPU
 recipe run on the NPU; GGUF models continue to use their configured CPU or GPU
 recipe. On Linux hosts exposing `/dev/kfd` or `/dev/dri`, Hearth also passes available
 GPU device nodes and their owning groups into Docker for Vulkan/ROCm GGUF recipes.
-If Lemonade detects the NPU but lists the FLM backend as installable, run
-`docker exec lemonade-server /opt/lemonade/lemonade backends install flm:npu`.
-Download an FLM model from **Downloads**. When the download completes, load it
 from **Models** and select it in Chat. If Lemonade needs to download weights during
-Load, Hearth allows up to an hour for each FLM load request. To restore the model
 on Hearth startup, select it as the default LAN model in
 **Settings**.
 To apply network, NPU, or GPU settings to an existing Lemonade container, run
@@ -1339,7 +1315,6 @@ An explicitly configured remote URL is preserved even when local runtimes are in
 
 Administrators can restart managed inference services from **Settings → Service
 controls → Restart all backends**. Hearth restarts LM Studio, Lemonade's gateway,
-vLLM, KoboldCPP, q38rocm, and FastFlowLM independently and reports each result.
 Use **Restart q38rocm** on its Settings card to restart only that service; it must
 already be loaded. A backend
 restart interrupts active inference and may require loading the model again. Use
@@ -1399,7 +1374,6 @@ bind mount uses the same absolute path inside and outside the app container; do 
 move it while assignments are active. Missing agent images build on first use.
 
 The app container does not include systemd. Hearth cannot natively start or stop host
-services for systemd-managed backends (vLLM, KoboldCPP, and FastFlowLM) from the
 Docker instance, and their inventory checks fail soft instead of blocking another
 backend's load.
 
@@ -1413,14 +1387,11 @@ through `deploy/install-lmstudio-server.sh`; pass `--skip-lmstudio-server`
 to skip that additional bootstrap.
 
 The broker runs `systemctl --user|--system` for a fixed allowlist of Hearth's units
-(`vllm.service`, `kobold.service`, `flm.service`) on 127.0.0.1:8765, auth by a random
 bearer token stored in `~/.config/hearth/backend-broker/token`. It also proxies a
-read-only subset of the FastFlowLM `flm` CLI (`list --filter installed|--filter all`,
 `pull <tag>`, `remove`, `--version`, and `pull-progress`) so Docker Hearth can download
 and delete NPU models on the host; the host Hearth install still runs everything else.
 The Docker app is built so the controls can be used from the browser; the UI reads the same
 commands the host Hearth install uses, and `~/.config/vllm`, `~/.config/koboldcpp`,
-`~/.config/fastflowlm`, and `~/.config/flm` are mounted at (`Path.home()`/".config") so
 load/unload sees the same inventory. Without the broker the previous behavior unchanged:
 the UI tells you to control those services from the host install.
 
@@ -1514,7 +1485,6 @@ but Help cannot generate gateway keys.
 `sudo bash deploy/install-host-deps.sh` installs Caddy and generates Hearth's model
 gateway. It creates random `opencode`, `vscode`, and `lan` bearer tokens, five
 authenticated HTTPS proxy blocks for LM Studio, Lemonade, vLLM, KoboldCPP, and
-FastFlowLM, Caddy's local CA certificates, and an exported CA root at
 `~/.local/share/hearth/hearth-ca.crt`. Tokens are written once to
 `~/.local/share/hearth/Caddyfile`; reruns preserve them, so OpenCode and Continue
 configurations already copied to clients keep working. The installer publishes a
