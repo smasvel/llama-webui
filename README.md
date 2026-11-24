@@ -57,39 +57,24 @@ Check each model's license and hardware requirements before downloading. See the
 
 ## Screenshots
 
-[![Hearth feature demo](docs/screenshots/hearth-feature-demo.gif)](docs/screenshots/hearth-feature-demo.mp4)
-
 | Chat | Models |
 |---|---|
-| ![Hearth chat workspace](docs/screenshots/chat.png) | ![Hearth model management](docs/screenshots/models.png) |
-
-| Model tests | Coding agents |
-|---|---|
-| ![Hearth model tests and saved results](docs/screenshots/model-tests.png) | ![Hearth agent task editor](docs/screenshots/agents.png) |
+| ![llama-web chat workspace](docs/screenshots/chat.png) | ![llama-web model management](docs/screenshots/models.png) |
 
 ## Installation
 
-- **Ubuntu:** From the project checkout, run `bash deploy/install-first-time.sh`. This
-  installs and configures the app, PostgreSQL, and required host components.
-- **Windows, macOS, or Linux release bundle:** Download a matching bundle from GitHub
-  Releases and follow its included setup instructions.
-- **Linux Docker deployment:** Run `bash deploy/install-docker.sh` for the containerized
-  app deployment.
+From the project checkout, run `bash deploy/install-workspace.sh`. This installs the app,
+its Python environment, the systemd units, and the Caddy reverse proxy. PostgreSQL and
+the llama.cpp engine are configured separately.
 
-The first visit prompts you to create the administrator account. Configure at least
-one model backend in **Settings**, then download and load a model from **Downloads** or
-**Models**. See [deploy/FIRST_TIME_INSTALL.md](deploy/FIRST_TIME_INSTALL.md) for the
-complete installation, backend, networking, and maintenance instructions.
-
-## Local model evaluation
-
-The **Model tests** page evaluates supported chat models with compatibility, reasoning,
-safety, and tool-use checks. Results include per-check details and response previews.
-Administrators can save reusable test scenarios with expected answers.
+The first visit prompts you to create the administrator account. Download a GGUF model
+from **Downloads** and load it from **Models** before chatting. See
+[deploy/FIRST_TIME_INSTALL.md](deploy/FIRST_TIME_INSTALL.md) for the complete
+installation, networking, and maintenance instructions.
 
 ## Coding agents and client access
 
-Hearth can run project tasks through OpenCode in isolated agent environments. Tasks can
+llama-web can run project tasks through OpenCode in isolated agent environments. Tasks can
 include project files, requirements, verification commands, and reusable skills. The
 Agents pages show progress and results, and support scheduled work where configured.
 Assignments are private by default. Explicit sharing gives recipients read access
@@ -97,14 +82,14 @@ to status and completed results. Controls, schedules, and private workspace file
 remain available to the owner. You can draft a task from Chat and see its status
 and results in the linked conversation.
 
-For desktop or LAN coding clients, Hearth can generate OpenCode and Continue
+For desktop or LAN coding clients, llama-web can generate OpenCode and Continue
 configurations for supported model endpoints. The gateway uses authentication and TLS.
 Hosts and clients configured for Tailscale can use it for remote access.
 
 ## OpenCode context compaction
 
 OpenCode compaction budgets scale with the selected model's loaded context. When Keep
-and Buffer are blank, Hearth calculates them as follows:
+and Buffer are blank, llama-web calculates them as follows:
 
 ```text
 buffer         = max(1, context // 12)
@@ -118,27 +103,27 @@ budget fits the loaded context.
 
 ## Data, access, and safety
 
-- PostgreSQL stores accounts, conversations, settings, model-test reports, metrics, and
-  agent task records. Back up PostgreSQL and any local files you want to retain.
-- Model files and generated media are stored in configured local directories or backend
-  caches. Their storage requirements depend on the models you choose.
+- PostgreSQL stores accounts, conversations, settings, and agent task records. Back up
+  PostgreSQL and any local files you want to retain.
+- Model files and generated media are stored in configured local directories. Their
+  storage requirements depend on the models you choose.
 - Account ownership protects private content. Administrators can view system-wide Live Logs.
-  The coding gateway uses separate
-  authenticated endpoints; configure TLS and network access for your environment.
-- Chat requests go to the selected local backend or optional hosted provider. Web
-  research and other integrations may contact the providers you configure.
-- **Use at your own risk.** Hearth is not a platform for investment advice, including
+  The coding gateway uses separate authenticated endpoints; configure TLS and network
+  access for your environment.
+- Chat requests go to the local llama.cpp engine. Web research and other integrations may
+  contact the providers you configure.
+- **Use at your own risk.** llama-web is not a platform for investment advice, including
   advice about stocks, securities, tickers, Nasdaq or S&P indexes, index funds, ETFs,
   or trading. It is not a healthcare provider and does not provide medical advice,
   diagnoses, or treatment plans. Consult qualified financial or medical professionals
   for decisions in those areas; seek emergency care for urgent medical concerns.
-- Hearth is not responsible for model-generated results, errors, or decisions made
+- llama-web is not responsible for model-generated results, errors, or decisions made
   from them. Model responses may be inaccurate or unsuitable; review them and check
   model licenses and provider terms before use.
 
 ## Development
 
-Application code is organized under `hearth/` by domain. `app.py` is the web entry
+Application code is organized under `llama_web/` by domain. `app.py` is the web entry
 point, `deploy/` contains installation and service configuration, and `tests/` contains
 the regression suite.
 
@@ -156,17 +141,6 @@ To include browser coverage:
 
 The browser runner discovers `tools/check_*_ui.py` suites and lists named checks
 for desktop and mobile pages, route permissions, and sign-in flows.
-
-For a live Playwright MCP chat regression, keep Hearth running with a chat model
-selected for the `admin` account and run:
-
-```bash
-.venv/bin/python tests/run_playwright_mcp_chat_regression.py
-```
-
-This sends a real Hearth chat request through that account's saved active model and
-the running Playwright MCP, checks a Great Clips salon in Rochester, NY, and removes
-the successful test conversation afterward. It does not load or switch models.
 
 For environment setup and deployment options, see the
 [installation guide](deploy/FIRST_TIME_INSTALL.md).
