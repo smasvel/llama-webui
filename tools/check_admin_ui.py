@@ -72,8 +72,8 @@ with contextlib.ExitStack() as stack:
         card.get_by_role('button', name='Disable agent workflow').click()
         expect(card).to_contain_text('Disabled', timeout=5000)
 
-        for route in ('/', '/models', '/downloads', '/metrics', '/agents', '/agents/new',
-                      '/agents/schedules', '/browse-history', '/quizzes', '/dmv', '/flm-converter'):
+        for route in ('/', '/models', '/downloads', '/agents', '/agents/new',
+                      '/agents/schedules', '/browse-history', '/quizzes', '/dmv', '/models', '/downloads'):
             response = context.request.get(f'http://127.0.0.1:{server.server_port}{route}')
             assert response.status == 200, f'{route} returned {response.status}'
         assert not errors, errors

@@ -43,16 +43,7 @@ PYTHON
 apt-get update
 apt-get install -y python3 python3-venv docker.io docker-compose-v2 acl curl git ffmpeg lynis caddy build-essential cmake pkg-config libatomic1 libvulkan1 mesa-vulkan-drivers vulkan-tools libsndfile1 espeak-ng software-properties-common libtcmalloc-minimal4t64
 systemctl enable --now docker.service
-# Generate the authenticated model gateway: random per-client bearer tokens (used as the
-# apiKey in the OpenCode/Continue configs), the Caddyfile blocks, and Caddy's local CA.
-# Existing tokens are preserved, and a legacy hand-installed block is left untouched.
-# leave the gateway half-configured.
-if command -v caddy >/dev/null; then
-  python3 "${project_dir}/tools/caddy_gateway_setup.py" \
-    --state-file "${target_home}/.local/share/hearth/Caddyfile" \
-    --owner "$target_user" \
-    --system-file /etc/caddy/Caddyfile
-fi
+# llama-web installs its own Caddyfile for the local gateway.
 usermod -aG render,video,docker "$target_user"
 systemctl daemon-reload
 # Ubuntu 26.04 includes Lemonade in its own package repository.
@@ -61,4 +52,6 @@ render_template "${project_dir}/deploy/hearth-lynis-sudoers" /etc/sudoers.d/hear
 chmod 0440 /etc/sudoers.d/hearth-lynis
 visudo -cf /etc/sudoers.d/hearth-lynis
 loginctl enable-linger "$target_user"
-tailscale serve --bg --https=8443 https+insecure://127.0.0.1:5443
+if command -v tailscale >/dev/null && tailscale status >/dev/null 2>&1; then
+  echo "Tailscale is available. Configure the gateway with deploy/Caddyfile if remote access is needed."
+fi

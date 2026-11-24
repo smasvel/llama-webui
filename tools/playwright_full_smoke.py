@@ -36,9 +36,9 @@ def main():
         page.wait_for_load_state("networkidle")
 
         paths = [
-            "/", "/models", "/downloads", "/metrics", "/live-logs", "/agents",
+            "/", "/models", "/downloads", "/live-logs", "/agents",
             "/agents/new", "/agents/schedules", "/agents/skills", "/quizzes",
-            "/settings", "/users", "/browse-history", "/model-tests", "/flm-converter", "/dmv",
+            "/settings", "/users", "/browse-history", "/dmv",
         ]
         for path in paths:
             try:

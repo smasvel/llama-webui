@@ -3,11 +3,10 @@
 set -euo pipefail
 project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 if [[ ${1:-} == --help ]]; then
-  echo 'Usage: bash deploy/install-docker.sh [--tailscale-https-port PORT] [--skip-lmstudio-server] [--skip-backend-broker]'
+  echo 'Usage: bash deploy/install-docker.sh [--tailscale-https-port PORT] [--skip-backend-broker]'
   echo 'Linux only. Creates .env.docker once; edit it before rerunning to customize ports.'
   exit 0
 fi
-skip_lmstudio_server=0
 skip_backend_broker=0
 tailscale_port=0
 while [[ $# -gt 0 ]]; do
@@ -18,9 +17,6 @@ while [[ $# -gt 0 ]]; do
       (( tailscale_port >= 1 && tailscale_port <= 65535 )) || { echo 'HTTPS port must be 1-65535.' >&2; exit 1; }
       command -v tailscale >/dev/null || { echo 'Install and connect Tailscale before requesting trusted HTTPS.' >&2; exit 1; }
       shift 2 ;;
-    --skip-lmstudio-server)
-      skip_lmstudio_server=1
-      shift ;;
     --skip-backend-broker)
       skip_backend_broker=1
       shift ;;
@@ -53,25 +49,7 @@ if [[ -n $tailscale_bin && -n $tailscale_socket_dir ]]; then
   export TAILSCALE_BIN=$tailscale_bin TAILSCALE_SOCKET_DIR=$tailscale_socket_dir
   compose+=(-f compose.tailscale.yaml)
 fi
-# The model gateway is host-level Caddy. Generate its random bearer tokens and local CA
-# when Caddy is installed, publish the managed block when sudo can run without a prompt,
-# and mount the host Caddyfile read-only so Help shows the real keys instead of a
-# placeholder. Caddy and its CA remain on the host.
-caddy_file=/etc/caddy/Caddyfile
-if command -v caddy >/dev/null; then
-  python3 "$project_dir/tools/caddy_gateway_setup.py" \
-    --state-file "$HOME/.local/share/hearth/Caddyfile" --owner "$(id -un)" || true
-  if [[ ! -r $caddy_file ]] || ! grep -q 'Hearth authenticated backend proxies' "$caddy_file"; then
-    if sudo -n true 2>/dev/null; then
-      sudo -n python3 "$project_dir/tools/caddy_gateway_setup.py" \
-        --state-file "$HOME/.local/share/hearth/Caddyfile" --owner "$(id -un)" \
-        --system-file "$caddy_file" || true
-    else
-      echo "Host Caddy is installed. Publish the generated gateway keys with:"
-      echo "  sudo python3 $project_dir/tools/caddy_gateway_setup.py --system-file $caddy_file"
-    fi
-  fi
-fi
+# llama-web ships its own Caddyfile for the 18471 gateway; no legacy gateway block is generated.
 if [[ -r $caddy_file ]]; then
   compose+=(-f compose.caddy.yaml)
 fi
@@ -120,16 +98,6 @@ elif command -v systemctl >/dev/null && [[ -d /run/systemd/system ]]; then
   bash "$project_dir/deploy/install-backend-broker.sh" --skip-if-active || true
 else
   echo 'Skipping the backend-control broker: systemd user services are not available here.'
-fi
-# Keep LM Studio's API server reachable too: inventory / load / unload go through the
-# shared `~/.lmstudio` CLI. Idempotent boot/start helper behind a systemd user unit.
-if [[ $skip_lmstudio_server -eq 0 ]]; then
-  if command -v systemctl >/dev/null && [[ -d /run/systemd/system ]]; then
-    # When LM Studio isn't installed the helper is a no-op, so the unit is harmless.
-    bash "$project_dir/deploy/install-lmstudio-server.sh" --skip-if-active || true
-  fi
-else
-  echo 'Skipping the LM Studio API bootstrap service (--skip-lmstudio-server).'
 fi
 # Mount the host's systemd-managed backend state directories into the container at the
 # with the Docker Hearth install. The **broker** (deploy/install-backend-broker.sh) runs

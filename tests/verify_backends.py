@@ -26,7 +26,7 @@ def main() -> None:
     print("== backend inventory ==")
     for label, client in (
         ("vLLM", vllm), ("KoboldCPP", kobold), ("LM Studio", lms),
-        ("Lemonade", lemonade), ("FastFlowLM", flm),
+        ("Lemonade", lemonade),
     ):
         try:
             models = client.list_models()
@@ -69,17 +69,6 @@ def main() -> None:
     report("loaded", [(m.get("id"), m.get("loaded_context_length")) for m in lms.list_models() if m.get("loaded_context_length")])
     lms.unload_model(lms_model)
     report("after unload", [(m.get("id"), m.get("loaded_context_length")) for m in lms.list_models() if m.get("loaded_context_length")])
-
-    print()
-    print("== FastFlowLM load / unload ==")
-    flm_model = "flm/llama3.2:1b"
-    flm.unload_model()
-    report("active after unload", flm.is_active())
-    flm.load_model(flm_model)
-    report("active after load", flm.is_active())
-    report("active tag", flm._read_active())
-    flm.unload_model()
-    report("active after final unload", flm.is_active())
 
     print()
     print("== Lemonade load / unload (embedding) ==")
@@ -138,7 +127,6 @@ def main() -> None:
     try:
         report("vllm is-active", vllm._systemctl("is-active"))
         report("kobold is-active", kobold._systemctl("is-active"))
-        report("flm is-active (system)", flm._systemctl("is-active"))
     except Exception as exc:
         report("broker-side systemctl", f"{type(exc).__name__}: {str(exc)[:140]}")
 

@@ -33,7 +33,7 @@ DEFAULT_TOKEN_FILE = os.path.expanduser(
 )
 # Docker llama_web drives these host units. Keeping the list explicit keeps the blast
 # radius of a leaked token very small.
-_DEFAULT_SERVICES = "vllm.service,kobold.service,q38rocm.service"
+_DEFAULT_SERVICES = "llama-web-engine.service,llama-web.service,llama-web-caddy.service"
 _ALLOWED_VERBS = frozenset({"start", "stop", "restart", "daemon-reload", "is-active", "is-enabled"})
 _ALLOWED_SCOPES = frozenset({"user", "system"})
 _ALLOWED_UNITS = frozenset(

@@ -1,9 +1,0 @@
-[Unit]
-Description=Periodically regenerate the desktop OpenCode config from live Hearth state
-
-[Timer]
-OnBootSec=90s
-OnUnitActiveSec=120s
-
-[Install]
-WantedBy=timers.target

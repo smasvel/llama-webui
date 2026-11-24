@@ -62,12 +62,9 @@ with contextlib.ExitStack() as stack:
         checks = {
             '/': ('Chats', '#model-select'),
             '/models': ('Models', '#model-groups'),
-            '/downloads': ('Download Models', '#all-search-form'),
-            '/model-tests': ('Model tests & repairs', '#tests-run'),
-            '/flm-converter': ('FLM NPU Converter', '#converter-form'),
+            '/downloads': ('Download Models', '#catalog-search'),
             '/browse-history': ('AI Browser History', '#history-search'),
             '/quizzes': ('Build your own practice tests', '#save-deck'),
-            '/metrics': ('Performance metrics', '#kpis'),
             '/live-logs': ('Live developer logs', '#live-feed'),
             '/users': ('Users', '#add-user-form'),
             '/settings': ('Settings', '#settings-form'),
@@ -143,12 +140,6 @@ with contextlib.ExitStack() as stack:
             page.reload()
             page.wait_for_timeout(150)
             check_table_dom(route, 'mobile')
-        page.goto(base + '/metrics')
-        expect(page.locator('#model-test-report tr')).to_have_count(1)
-        expect(page.locator('.metric-test-report thead th')).to_have_count(12)
-        expect(page.locator('.metric-test-report thead')).to_contain_text('Generated tok/s')
-        expect(page.locator('.metric-test-report tbody tr').last).to_contain_text('72.1')
-        check_table_dom('/metrics', 'populated report')
         page.set_viewport_size({'width': 1440, 'height': 1000})
 
         # Local GGUF upload belongs to Models, reports progress, refreshes the model
@@ -218,22 +209,6 @@ with contextlib.ExitStack() as stack:
                                                         'error_rate': None, 'coding_requests': 0,
                                                         'coding_errors': 0, 'reviewed': 0,
                                                         'coding_accuracy': None}]))
-        try:
-            page.goto(base + '/metrics')
-            expect(page.locator('#recent-count')).to_contain_text('of', timeout=5000)
-            page.locator('#f-model').fill('no-such-model-xyz')
-            expect(page.locator('#recent-count')).to_contain_text('No matching requests', timeout=5000)
-            expect(page.locator('#model-report')).to_contain_text('admin-coverage-fixture-model', timeout=5000)
-            page.locator('#f-model').fill('admin-coverage-fixture-model')
-            expect(page.locator('#recent')).to_contain_text('admin-coverage-fixture-model', timeout=5000)
-            page.locator('#f-model').fill('')
-            page.locator('#range').select_option('1')
-            page.get_by_role('button', name='Refresh').click()
-            expect(page.locator('#kpis')).to_contain_text('Requests')
-        finally:
-            if app.metrics_store.summary(hours=24)['totals']['requests'] > metrics_rows_before:
-                app.metrics_store.clear_all(user_id=admin['id'])
-
         # History search hits the seeded row and filters it out for a missing term.
         page.goto(base + '/browse-history')
         expect(page.locator('#history-rows')).to_contain_text('Admin coverage fixture', timeout=5000)
@@ -275,8 +250,8 @@ with contextlib.ExitStack() as stack:
         context.clear_cookies()
         context.add_cookies([{'name': app.app.config['SESSION_COOKIE_NAME'], 'value': client.get_cookie(app.app.config['SESSION_COOKIE_NAME']).value,
                               'domain': '127.0.0.1', 'path': '/'}])
-        for route in ('/users', '/settings', '/downloads', '/models', '/model-tests', '/flm-converter',
-                      '/browse-history', '/quizzes', '/metrics', '/live-logs'):
+        for route in ('/users', '/settings', '/downloads', '/models',
+                      '/browse-history', '/quizzes', '/live-logs'):
             response = context.request.get(base + route, max_redirects=0)
             assert response.status in (302, 303, 403), f'{route} was not admin protected: {response.status}'
             print(f'CASE PASS regular account denied {route}')

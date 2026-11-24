@@ -1,7 +1,0 @@
-[Unit]
-Description=Re-derive OpenCode compaction and model limits from live Hearth backends
-
-[Service]
-Type=oneshot
-StandardOutput=null
-ExecStart=__HEARTH_DIR__/.venv/bin/python __HEARTH_DIR__/tools/sync_opencode_config.py

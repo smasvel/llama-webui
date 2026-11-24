@@ -17,10 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 BACKENDS = {
-    "lmstudio": ("LM Studio", "http://localhost:1234", {"Windows", "Darwin", "Linux"}),
-    "kobold": ("KoboldCPP", "http://127.0.0.1:5001", {"Windows", "Darwin", "Linux"}),
-    "vllm": ("vLLM API server", "http://localhost:8000", {"Windows", "Darwin", "Linux"}),
-    "lemonade": ("Lemonade Server", "http://localhost:13305", {"Linux"}),
+    "llamacpp": ("llama.cpp engine", "http://127.0.0.1:18473", {"Windows", "Darwin", "Linux"}),
 }
 
 
@@ -130,16 +127,8 @@ def install(args=None):
     ensure_certificate(ROOT / 'certs')
 
     from llama_web.storage import settings_store
-    settings_store.set(f"{backend}_base_url", backend_url)
-    if not options.no_api_key:
-        try:
-            secret = getpass.getpass(f"{BACKENDS[backend][0]} API key (leave blank to preserve an existing key): ")
-        except EOFError:
-            secret = ""
-        if secret:
-            settings_store.set(f"{backend}_api_key", secret)
-    print(f"\nllama_web is installed and configured for {BACKENDS[backend][0]} at {backend_url}.")
-    print("Download a model in llama_web before chatting. Runtimes not selected for installation must be installed separately.")
+    print(f"\nllama_web is installed with its local {BACKENDS[backend][0]} at {backend_url}.")
+    print("Download a GGUF from the Downloads page and set LLAMA_MODEL in ~/.config/llama-web/server.conf.")
     print("Start llama_web with deploy/start-llama_web.ps1 on Windows, or bash deploy/start-llama_web.sh on macOS/Linux.")
     print("Then open https://localhost:5443 and create the administrator account on first use.")
 

@@ -8,11 +8,11 @@ class ReleaseInstallerBackendTests(unittest.TestCase):
     def test_platform_backend_choices(self):
         self.assertEqual(
             {key for key, *unused in BACKENDS.items() if "Windows" in BACKENDS[key][2]},
-            {"lmstudio", "kobold", "vllm"},
+            {"llamacpp"},
         )
         self.assertEqual(
             {key for key, *unused in BACKENDS.items() if "Darwin" in BACKENDS[key][2]},
-            {"lmstudio", "kobold", "vllm"},
+            {"llamacpp"},
         )
 
 
@@ -20,7 +20,7 @@ class ReleaseInstallerBackendTests(unittest.TestCase):
         answers = iter(["1", ""])
         with patch("builtins.print") as output:
             selected = choose_backend("Darwin", lambda _prompt: next(answers))
-        self.assertEqual(selected, ("lmstudio", "http://localhost:1234"))
+        self.assertEqual(selected, ("llamacpp", "http://127.0.0.1:18473"))
         rendered = " ".join(str(call) for call in output.call_args_list)
         self.assertNotIn("FastFlowLM", rendered)
         self.assertNotIn("Lemonade", rendered)
@@ -37,7 +37,7 @@ class ReleaseInstallerAutomationTests(unittest.TestCase):
     def test_resolved_backend_equals_arguments_are_not_duplicated(self):
         import os
         from tools import release_installer
-        args = ['--backend=lmstudio', '--backend-url=http://remote:1234',
+        args = ['--backend=llamacpp', '--backend-url=http://remote:18473',
                 '--skip-backend-install', '--skip-browser', '--no-api-key']
         with patch.dict(os.environ, {'LLAMA_WEB_RELEASE_INSTALL_IN_VENV': '0'}), \
              patch.object(release_installer.platform, 'system', return_value='Linux'), \
@@ -46,7 +46,7 @@ class ReleaseInstallerAutomationTests(unittest.TestCase):
              patch.object(release_installer.subprocess, 'run') as run:
             release_installer.install(args)
         forwarded = run.call_args.args[0]
-        self.assertIn('--backend=lmstudio', forwarded)
+        self.assertIn('--backend=llamacpp', forwarded)
         self.assertNotIn('--backend', forwarded)
         self.assertNotIn('--backend-url', forwarded)
         self.assertEqual(forwarded.count('--skip-backend-install'), 1)
@@ -61,7 +61,7 @@ class ReleaseInstallerAutomationTests(unittest.TestCase):
              patch.object(release_installer.shutil, 'which', return_value='/usr/bin/docker'), \
              patch.object(release_installer, '_run') as run, \
              patch.object(release_installer.subprocess, 'run'):
-            release_installer.install(['--backend', 'lmstudio', '--skip-backend-install', '--no-api-key'])
+            release_installer.install(['--backend', 'llamacpp', '--skip-backend-install', '--no-api-key'])
         browser = [call.args[0] for call in run.call_args_list if 'playwright' in call.args[0]]
         self.assertEqual(len(browser), 1)
         self.assertEqual(browser[0][-4:], ['playwright', 'install', '--with-deps', 'chromium'])
@@ -78,7 +78,7 @@ class ReleaseInstallerAutomationTests(unittest.TestCase):
              patch.object(first_time_setup, 'install_agent_runtime') as agent, \
              patch.object(backend_installer, 'install_backends') as runtime:
             with self.assertRaisesRegex(RuntimeError, 'Existing local database'):
-                release_installer.install(['--backend', 'lmstudio', '--install-backends', 'lmstudio', '--no-api-key'])
+                release_installer.install(['--backend', 'llamacpp', '--install-backends', 'lmstudio', '--no-api-key'])
         agent.assert_not_called()
         runtime.assert_not_called()
 

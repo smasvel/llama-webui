@@ -18,7 +18,7 @@ fi
 if [[ ${1:-} == --help || $# -gt 0 ]]; then
   echo 'Usage: bash deploy/install-backend-broker.sh [--skip-if-active]'
   echo 'Installs ~/.config/systemd/user/hearth-backend-broker.service on the Hearth host'
-  echo 'and writes the shared bearer token to ~/.config/hearth/backend-broker/token (mode 600).'
+  echo 'and writes the shared bearer token to ~/.config/llama_web/backend-broker/token (mode 600).'
   echo '--skip-if-active exits silently when the broker is already running and current.'
   exit 0
 fi
@@ -38,7 +38,7 @@ command -v systemctl >/dev/null || { echo 'This broker requires systemd (Linux h
 command -v python3 >/dev/null || { echo 'python3 is required.' >&2; exit 1; }
 
 user_dir=$HOME/.config/systemd/user
-token_dir=$HOME/.config/hearth/backend-broker
+token_dir=$HOME/.config/llama_web/backend-broker
 mkdir -p "$user_dir" "$token_dir"
 chmod 700 "$token_dir"
 token_file=$token_dir/token
@@ -54,7 +54,7 @@ unit=$user_dir/hearth-backend-broker.service
 escaped_dir="${project_dir//%/%%}"
 cat > "$unit" <<UNIT
 [Unit]
-Description=Hearth backend control broker (scoped systemctl access)
+Description=llama-web backend control broker (scoped systemctl access)
 After=network.target
 
 [Service]
@@ -73,10 +73,10 @@ systemctl --user enable --now hearth-backend-broker.service
 env_file=$project_dir/.env.docker
 if [[ -f $env_file ]]; then
   [[ $(stat -c '%a' "$env_file") == "600" ]] || chmod 600 "$env_file"
-  grep -q '^HEARTH_BACKEND_BROKER_URL=' "$env_file" || \
-    printf 'HEARTH_BACKEND_BROKER_URL=http://127.0.0.1:8765\n' >> "$env_file"
-  grep -q '^HEARTH_BACKEND_BROKER_TOKEN=' "$env_file" || \
-    printf 'HEARTH_BACKEND_BROKER_TOKEN=%s\n' "$(cat "$token_file")" >> "$env_file"
+  grep -q '^LLAMA_WEB_BACKEND_BROKER_URL=' "$env_file" || \
+    printf 'LLAMA_WEB_BACKEND_BROKER_URL=http://127.0.0.1:8765\n' >> "$env_file"
+  grep -q '^LLAMA_WEB_BACKEND_BROKER_TOKEN=' "$env_file" || \
+    printf 'LLAMA_WEB_BACKEND_BROKER_TOKEN=%s\n' "$(cat "$token_file")" >> "$env_file"
   chmod 600 "$env_file"
 fi
 
