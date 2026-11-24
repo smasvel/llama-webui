@@ -16,4 +16,4 @@ def session_cookie_name(port: int) -> str:
     digits = re.sub(r"\D", "", str(port)) or "0"
     # Bump this generation when replacing stale/expired session cookies so the browser
     # sends the new login independently of the cookie created by the previous app build.
-    return f"llama_web_session_{digits}_v2"
+    return f"llama_web_session_{digits}_v3"

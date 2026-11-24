@@ -296,7 +296,7 @@ intentional because passwords should be verified, not reversibly encrypted.
 The encrypted Flask session key is stored in PostgreSQL as well. Its encryption key is
 derived from the PostgreSQL connection password, so changing that database password
 rotates the session key and requires users to sign in again. The session cookie includes
-the listen port and cookie generation (`hearth_session_5443_v2`, `hearth_session_5444_v2`,
+the listen port and cookie generation (`llama_web_session_5443_v3`, `llama_web_session_5444_v3`,
 and so on), because browsers share cookies across ports on the same host. The new generation
 isolates sign-ins from stale cookies issued by an older app version. Several Hearth
 installations on one machine can therefore be signed in at the same time without their

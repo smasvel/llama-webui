@@ -171,6 +171,9 @@ app.config.update(
 app.register_blueprint(model_downloads_bp)
 
 _SESSION_IDLE_SECONDS = 30 * 60
+# Bump with the cookie generation in session_cookie.py so sessions from an older
+# build cannot be honoured even if a browser still has a validly signed cookie.
+_AUTH_SESSION_VERSION = 3
 # Built-in defaults for the chat request limits. An admin can override these from the
 # Settings panel (see _chat_limits()); by default a request that omits max_tokens uses the
 # full cap rather than the old 8192, so llama_web's own chat no longer stops short on max length.
@@ -325,7 +328,16 @@ def _login_csrf_token() -> str:
 def _expose_current_user():
     # The GGUF download blueprint authorizes against g.user; the rest of this app
     # reads the session directly. Keep both views consistent on every request.
-    g.user = users_store.get_user_by_id(session.get("user_id", "")) if session.get("logged_in") else None
+    g.user = None
+    if not session.get("logged_in"):
+        return
+    version = session.get("auth_version")
+    if (version is not None and version != _AUTH_SESSION_VERSION) or not session.get("user_id"):
+        # A session minted by an older build must never be honoured, even if its
+        # cookie is still correctly signed and the browser kept sending it.
+        session.clear()
+        return
+    g.user = users_store.get_user_by_id(session["user_id"])
 
 
 @app.before_request
@@ -1434,7 +1446,16 @@ def login():
             and expected_csrf
             and secrets.compare_digest(supplied_csrf, expected_csrf)
         ):
-            return "Invalid or expired sign-in form", 400
+            # A cached/tabbed sign-in form can outlive its CSRF token (or another
+            # tab may have signed in). Discard the stale session state and hand the
+            # browser a fresh form instead of a dead-end error page.
+            session.clear()
+            return render_template(
+                "login.html",
+                error="Your sign-in form expired. Please try again.",
+                csrf_token=_login_csrf_token(),
+                setup_mode=users_store.count_users() == 0,
+            ), 400
         # Discard an old or expired authenticated session before attempting a new
         # login. The login CSRF token was validated above; failed credentials render
         # a fresh anonymous form, and successful credentials create a new session.
@@ -1466,6 +1487,7 @@ def login():
                     session["agentic_workflow_enabled"] = True
                     session["login_csrf_token"] = secrets.token_urlsafe(32)
                     session["last_activity"] = time.time()
+                    session["auth_version"] = _AUTH_SESSION_VERSION
                     session.permanent = False
                     return redirect(url_for("index"))
             return render_template("login.html", error=error, csrf_token=_login_csrf_token(),
@@ -1496,6 +1518,7 @@ def login():
             )
             session["login_csrf_token"] = secrets.token_urlsafe(32)
             session["last_activity"] = time.time()
+            session["auth_version"] = _AUTH_SESSION_VERSION
             # No Expires/Max-Age: closing the browser discards the cookie and a new
             # browser session therefore always requires a fresh login.
             session.permanent = False
@@ -1511,7 +1534,7 @@ def login():
 @app.get("/media/llama_web-feature-demo.mp4")
 def llama_web_feature_demo():
     return send_file(
-        BASE_DIR / "docs" / "screenshots" / "llama_web-feature-demo.mp4",
+        BASE_DIR / "docs" / "screenshots" / "hearth-feature-demo.mp4",
         mimetype="video/mp4", conditional=True, max_age=3600,
     )
 
@@ -1519,7 +1542,7 @@ def llama_web_feature_demo():
 @app.get("/media/llama_web-feature-demo-poster.jpg")
 def llama_web_feature_demo_poster():
     return send_file(
-        BASE_DIR / "docs" / "screenshots" / "llama_web-feature-demo-poster.jpg",
+        BASE_DIR / "docs" / "screenshots" / "hearth-feature-demo-poster.jpg",
         mimetype="image/jpeg", conditional=True, max_age=3600,
     )
 
