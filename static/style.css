@@ -887,6 +887,8 @@ html, body {
 .msg-list li { margin: 4px 0; line-height: 1.5; }
 .msg-quote { margin: 10px 0; padding: 8px 12px; border-left: 3px solid var(--accent); background: rgba(127,155,199,.08); border-radius: 0 8px 8px 0; }
 .chat-remote-image { display: block; max-width: 100%; height: auto; margin: 10px 0; border-radius: 8px; border: 1px solid var(--border); }
+.tool-call-render { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(127,155,199,.06); }
+.tool-call-title { font-weight: 650; color: var(--accent); }
 .data-render { margin: 10px 0; }
 .data-render .table-block { margin-bottom: 6px; }
 .data-raw { margin-top: 4px; font-size: 12px; }

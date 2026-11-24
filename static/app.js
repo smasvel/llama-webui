@@ -1521,7 +1521,10 @@
   // Turn a raw JSON payload into a visual table/list instead of showing braces.
   // The original text stays available in a collapsed <details> block.
   function renderStructuredData(text) {
-    const source = String(text || "").trim();
+    // Older saved replies contain native end-of-turn markers after the JSON payload.
+    const source = String(text || "")
+      .replace(/<\/?(?:end_of_turn|im_end)>/gi, "")
+      .trim();
     if (!source.startsWith("[") && !source.startsWith("{")) return null;
     let value;
     try {
@@ -1530,12 +1533,21 @@
       return null;
     }
     let visual = "";
+    let toolCallOnly = false;
     if (Array.isArray(value) && value.length && value.every((row) => Array.isArray(row))) {
       visual = renderTableBlock({
         header: value[0].map((cell) => String(cell)),
         aligns: [],
         body: value.slice(1).map((row) => row.map((cell) => String(cell))),
       });
+    } else if (Array.isArray(value) && value.length && value.every((row) => row && typeof row === "object" && !Array.isArray(row)
+        && typeof row.name === "string" && row.arguments && typeof row.arguments === "object")) {
+      visual = value.map((call) => {
+        const args = Object.entries(call.arguments).map(([key, item]) =>
+          `<li><strong>${renderInline(key)}:</strong> ${renderInline(typeof item === "object" ? JSON.stringify(item) : String(item))}</li>`).join("");
+        return `<div class="tool-call-render"><div class="tool-call-title">Tool call: ${renderInline(call.name)}</div><ul class="msg-list">${args}</ul></div>`;
+      }).join("");
+      toolCallOnly = true;
     } else if (Array.isArray(value) && value.length && value.every((row) => row && typeof row === "object" && !Array.isArray(row))) {
       const keys = [...new Set(value.flatMap((row) => Object.keys(row)))];
       visual = renderTableBlock({
@@ -1555,6 +1567,7 @@
     } else {
       return null;
     }
+    if (toolCallOnly) return `<div class="data-render">${visual}</div>`;
     return `<div class="data-render">${visual}<details class="data-raw"><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre></details></div>`;
   }
 
@@ -1572,6 +1585,15 @@
     const htmlLineRe = /<\/?[a-z][\w-]*[\s>]/i;
     let i = 0;
     while (i < lines.length) {
+      if (/^[{\[]/.test(lines[i].trim())) {
+        const data = renderStructuredData(lines[i]);
+        if (data) {
+          flushPara();
+          html += data;
+          i++;
+          continue;
+        }
+      }
       const table = parseTableBlock(lines, i);
       if (table) {
         flushPara();
