@@ -4,6 +4,7 @@ Wants=llama-web-engine.service
 After=llama-web-engine.service
 
 [Service]
+Environment=PORT=18474
 WorkingDirectory=%h/.local/share/llama-web
 ExecStart=%h/.local/share/llama-web/.venv/bin/python %h/.local/share/llama-web/app.py
 Restart=on-failure

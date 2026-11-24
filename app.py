@@ -1843,7 +1843,7 @@ def api_restart_llama_web():
         model_metadata_store.record_service_status("llama_web", "restarting")
     except Exception as exc:
         print(f"[restart] Could not create llama_web restart job: {exc}", flush=True)
-    subprocess.Popen(["systemctl", "--user", "restart", "ai-webui.service"],
+    subprocess.Popen(["systemctl", "--user", "restart", "llama-web.service"],
                      start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return jsonify({"ok": True, "message": "llama_web restart requested. This page will disconnect briefly.", "job_id": job_id}), 202
 
