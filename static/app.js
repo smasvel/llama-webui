@@ -200,6 +200,7 @@
     });
   }
 
+  wireCopyButton(document.getElementById("copy-linux-trust"), document.getElementById("help-linux-trust"));
   wireCopyButton(copyCaCertBtn, document.getElementById("help-ca-cert"));
   wireCopyButton(copyConfigYamlBtn, document.getElementById("help-config-yaml"));
   wireCopyButton(copyMacTrustBtn, document.getElementById("help-mac-trust"));
@@ -311,12 +312,11 @@
       setStatus(true, `${models.length} model(s) on disk`);
       renderModelList();
       renderModelSelect();
-      refreshHelp();
     } catch (err) {
       setStatus(false, err.message);
       renderHelpModelInventory(null, err.message);
       if (modelListEl) {
-        modelListEl.innerHTML = `<p class="hint">Could not reach LM Studio.<br>${escapeHtml(err.message)}</p>`;
+        modelListEl.innerHTML = `<p class="hint">Could not load models.<br>${escapeHtml(err.message)}</p>`;
       }
     }
   }
@@ -324,14 +324,6 @@
   function renderHelpModelInventory(items, error = "") {
     const inventory = document.getElementById("help-model-inventory");
     if (!inventory) return;
-    const curlModel = document.getElementById("help-curl-model");
-    const lemonadeChat = (items || []).find((model) => model.backend === "lemonade"
-      && model.type === "llm" && model.state === "loaded")
-      || (items || []).find((model) => model.backend === "lemonade" && model.type === "llm");
-    if (curlModel) {
-      const modelId = lemonadeChat?.id || "MODEL_ID_FROM_CURRENT_INVENTORY";
-      curlModel.textContent = JSON.stringify(modelId).slice(1, -1).replaceAll("'", "\\u0027");
-    }
     inventory.replaceChildren();
     if (items === null) {
       const message = document.createElement("p");
@@ -396,41 +388,6 @@
 
   // Keep the Help panel current with what's actually downloaded/loadable. All of the help's
   // machine-specific data (LAN IP, Caddy token/ports, CA cert, and the Continue / OpenCode
-  // config blocks built from the live model list) is generated server-side at /api/help and
-  // rendered into the page at load. After any model change (download / load / unload /
-  // delete — all call fetchModels()) we re-fetch it so a newly downloaded model shows up in
-  // the configs without a full reload. The initial call is skipped because the page was just
-  // server-rendered with fresh data.
-  let helpRefreshedOnce = false;
-  async function refreshHelp() {
-    if (!document.getElementById("help-opencode-config")) return; // Help not in DOM
-    if (!helpRefreshedOnce) { helpRefreshedOnce = true; return; }  // load render is already fresh
-    try {
-      const res = await fetch("/api/help");
-      if (!res.ok) return;
-      const d = await res.json();
-      const set = (id, val) => {
-        const el = document.getElementById(id);
-        if (el && typeof val === "string") el.textContent = val;
-      };
-      set("help-opencode-config", d.opencode_config);
-      set("help-config-yaml", d.continue_yaml);
-      set("help-ca-cert", d.ca_cert);
-      set("help-tailscale-config-yaml", d.tailscale_continue_yaml);
-      set("help-tailscale-opencode-config", d.tailscale_opencode_config);
-      for (const [name, command] of Object.entries(d.tailscale_ca_trust_commands || {})) {
-        set(`help-tailscale-${name === "macos" ? "mac" : name}-trust`, command);
-      }
-      for (const [name, url] of Object.entries(d.tailscale_links || {})) {
-        const link = document.getElementById(`help-tailscale-${name}-link`);
-        if (link) {
-          link.href = url;
-          if (name === "chat") link.textContent = `Chat — ${url}`;
-        }
-      }
-    } catch { /* keep the server-rendered content on any failure */ }
-  }
-
   function buildModelCard(m) {
     const loaded = m.state === "loaded";
     const unavailable = m.loadable === false;

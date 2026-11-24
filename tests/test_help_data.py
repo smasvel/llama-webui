@@ -6,11 +6,15 @@ from llama_web.core import help_data
 
 
 class TailscaleHelpTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch.object(help_data.zen, "api_key", return_value="")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
 
     @patch.object(help_data.model_metadata_store, "get_model_configured_context", return_value=131072)
     def test_loaded_context_wins_over_saved_maximum(self, saved):
-        model = {"backend": "lemonade", "id": "Muse", "state": "loaded",
+        model = {"backend": "llamacpp", "id": "Muse", "state": "loaded",
                  "loaded_context_length": 12495, "configured_context_length": 131072}
         self.assertEqual(help_data._configured_or_loaded_context(model), 12495)
         saved.assert_not_called()
@@ -22,7 +26,7 @@ class TailscaleHelpTests(unittest.TestCase):
     def test_auto_compaction_defaults_on_and_can_be_disabled(self, _get):
         cfg = json.loads(help_data.build_opencode_config(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"lemonade": ["Muse"]}, {}))
+            {"llamacpp": ["Muse"]}, {}))
         self.assertTrue(cfg["compaction"]["auto"])
 
     @patch.object(help_data.settings_store, "get", side_effect=lambda key:
@@ -30,16 +34,16 @@ class TailscaleHelpTests(unittest.TestCase):
     def test_auto_compaction_can_be_disabled_explicitly(self, _get):
         cfg = json.loads(help_data.build_opencode_config(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"lemonade": ["Muse"]}, {}))
+            {"llamacpp": ["Muse"]}, {}))
         self.assertFalse(cfg["compaction"]["auto"])
 
     def test_help_context_uses_loaded_size_instead_of_supported_maximum(self):
         cfg = json.loads(help_data.build_opencode_config(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"lemonade": ["large", "small"]}, {},
-            ctx_by_model={("lemonade", "large"): 8192, ("lemonade", "small"): 8192},
+            {"llamacpp": ["large", "small"]}, {},
+            ctx_by_model={("llamacpp", "large"): 8192, ("llamacpp", "small"): 8192},
             ))
-        entries = cfg["provider"]["lemonade"]["models"]
+        entries = cfg["provider"]["llamacpp"]["models"]
         self.assertEqual(entries["large"]["limit"]["context"], 8192)
         self.assertEqual(entries["small"]["limit"]["context"], 8192)
 
@@ -47,9 +51,9 @@ class TailscaleHelpTests(unittest.TestCase):
     def test_compaction_budget_uses_loaded_context_for_any_model(self, _get):
         cfg = json.loads(help_data.build_opencode_config(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"lemonade": ["arbitrary-large-context-model"]}, {},
-            ctx_by_model={("lemonade", "arbitrary-large-context-model"): 32768}))
-        entry = cfg["provider"]["lemonade"]["models"]["arbitrary-large-context-model"]
+            {"llamacpp": ["arbitrary-large-context-model"]}, {},
+            ctx_by_model={("llamacpp", "arbitrary-large-context-model"): 32768}))
+        entry = cfg["provider"]["llamacpp"]["models"]["arbitrary-large-context-model"]
         self.assertEqual(entry["limit"]["context"], 32768)
         self.assertEqual(cfg["compaction"], {
             "auto": True, "keep": {"tokens": 29526}, "buffer": 2730})
@@ -58,13 +62,12 @@ class TailscaleHelpTests(unittest.TestCase):
     def test_compaction_budget_uses_selected_model_loaded_context(self, _get):
         cfg = json.loads(help_data.build_opencode_config(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"lemonade": ["large-model", "small-model"],
-             "lmstudio": ["tiny-model"]},
-            {"lemonade": ["large-model"]},
-            ctx_by_model={("lemonade", "large-model"): 65536,
-                          ("lemonade", "small-model"): 4096,
-                          ("lmstudio", "tiny-model"): 2048}))
-        self.assertEqual(cfg["model"], "lemonade/large-model")
+            {"llamacpp": ["large-model", "small-model", "tiny-model"]},
+            {"llamacpp": ["large-model"]},
+            ctx_by_model={("llamacpp", "large-model"): 65536,
+                          ("llamacpp", "small-model"): 4096,
+                          ("llamacpp", "tiny-model"): 2048}))
+        self.assertEqual(cfg["model"], "llamacpp/large-model")
         self.assertEqual(cfg["compaction"], {
             "auto": True, "keep": {"tokens": 59051}, "buffer": 5461})
 
@@ -74,9 +77,9 @@ class TailscaleHelpTests(unittest.TestCase):
             with self.subTest(model=model):
                 cfg = json.loads(help_data.build_opencode_config(
                     '203.0.113.10', 'test-key', help_data._DEFAULT_PORTS,
-                    {'lemonade': [model]}, {}, network_label='Tailscale',
-                    ctx_by_model={('lemonade', model): 4096}))
-                self.assertEqual(cfg['provider']['lemonade']['models'][model]['limit'],
+                    {'llamacpp': [model]}, {}, network_label='Tailscale',
+                    ctx_by_model={('llamacpp', model): 4096}))
+                self.assertEqual(cfg['provider']['llamacpp']['models'][model]['limit'],
                                  {'context': 4096, 'output': 2048})
                 self.assertEqual(cfg['compaction'],
                                  {'auto': True, 'keep': {'tokens': 3691}, 'buffer': 341})
@@ -86,16 +89,16 @@ class TailscaleHelpTests(unittest.TestCase):
     def test_mixed_backend_compaction_uses_selected_default_model_window(self, _get):
         cfg = json.loads(help_data.build_opencode_config(
             '203.0.113.10', 'test-key', help_data._DEFAULT_PORTS,
-            {'lemonade': ['Muse'], 'lmstudio': ['small']}, {},
-            ctx_by_model={('lemonade', 'Muse'): 65536, ('lmstudio', 'small'): 4096}))
+            {'llamacpp': ['Muse', 'small']}, {},
+            ctx_by_model={('llamacpp', 'Muse'): 65536, ('llamacpp', 'small'): 4096}))
         self.assertEqual(cfg['compaction'],
                          {'auto': True, 'keep': {'tokens': 59051}, 'buffer': 16384})
 
     def test_continue_uses_saved_context_over_backend_default(self):
         result = help_data.build_continue_yaml(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"lemonade": ["Muse-Glimmer-30B-GGUF"]}, [], network_label="Tailscale",
-            ctx_by_model={("lemonade", "Muse-Glimmer-30B-GGUF"): 131072})
+            {"llamacpp": ["Muse-Glimmer-30B-GGUF"]}, [], network_label="Tailscale",
+            ctx_by_model={("llamacpp", "Muse-Glimmer-30B-GGUF"): 131072})
         self.assertIn("contextLength: 131072", result)
         self.assertNotIn("contextLength: 65536", result)
 
@@ -154,21 +157,20 @@ class HelpDataCacheTests(unittest.TestCase):
 
 class OpenCodeConsoleConfigTests(unittest.TestCase):
     @patch.object(help_data.settings_store, "get", return_value=None)
-    def test_generated_kobold_model_advertises_tool_support_only_for_kobold(self, _setting):
+    def test_generated_config_uses_the_current_gateway_port(self, _setting):
         cfg = json.loads(help_data.build_opencode_config(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"kobold": ["kobold-model"], "vllm": ["vllm-model"]}, {}))
-        self.assertEqual(cfg["provider"]["kobold"]["models"]["kobold-model"]["capabilities"],
-                         {"tools": True})
-        self.assertNotIn("capabilities", cfg["provider"]["vllm"]["models"]["vllm-model"])
+            {"llamacpp": ["local-model"]}, {}))
+        self.assertEqual(cfg["provider"]["llamacpp"]["options"]["baseURL"],
+                         "https://203.0.113.10:18471/v1")
 
     @patch.object(help_data.settings_store, "get", return_value=None)
     @patch.object(help_data.zen, "api_key", return_value="")
     def test_console_providers_absent_without_a_key(self, _key, _setting):
         cfg = json.loads(help_data.build_opencode_config(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"lemonade": ["Muse"]}, {},
-            ctx_by_model={("lemonade", "Muse"): 65536}))
+            {"llamacpp": ["Muse"]}, {},
+            ctx_by_model={("llamacpp", "Muse"): 65536}))
         self.assertNotIn("opencode", cfg["provider"])
 
     @patch.object(help_data.settings_store, "get", return_value=None)
@@ -179,7 +181,7 @@ class OpenCodeConsoleConfigTests(unittest.TestCase):
     def test_console_provider_embeds_key_windows_and_output(self, _key, _models, _setting):
         cfg = json.loads(help_data.build_opencode_config(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"lemonade": []}, {}))
+            {"llamacpp": []}, {}))
         provider = cfg["provider"]["opencode"]
         self.assertEqual(provider["options"]["baseURL"],
                          "https://opencode.ai/inference/openai/v1")

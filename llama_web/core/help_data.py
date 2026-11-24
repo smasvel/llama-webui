@@ -1,18 +1,9 @@
-"""Runtime generation of the Help panel's machine-specific data.
+"""Machine-specific data for the chat Help panel and config generation.
 
-Everything the Help panel needs that is specific to *this* machine — the LAN IP, the Caddy
-bearer token and proxy ports, the Caddy CA root certificate, and the Continue / OpenCode
-config blocks — is derived here from live sources at request time, so the help never goes
-stale by hand:
-
-  * LAN IP        — a UDP socket's local address (no packets actually sent)
-  * token + ports — parsed from /etc/caddy/Caddyfile (world-readable)
-  * CA root cert  — Caddy's admin API (GET :2019/pki/ca/local -> root_certificate);
-                    the root isn't in the served TLS chain, but the admin API has it
-  * models        — the same live LM Studio / Lemonade / vLLM lists the Models panel uses
-
-The two config blocks (Continue YAML, OpenCode JSON) are then generated from those values +
-the current model inventory, so a freshly downloaded model appears automatically.
+The panel shows live model inventory, local addresses, Tailscale links and the
+local CA certificate. Generated Continue/OpenCode configuration remains available
+for the optional config-sync tool. All values are derived at request time so the
+help does not go stale by hand.
 """
 
 from __future__ import annotations
@@ -27,10 +18,6 @@ from urllib.parse import urlsplit
 
 import requests
 
-from llama_web.backends import lmstudio_client as lms
-from llama_web.backends import lemonade_client as lemonade
-from llama_web.backends import vllm_client as vllm
-from llama_web.backends import kobold_client as kobold
 from llama_web.backends import opencode_client as zen
 from llama_web.storage import settings_store
 from llama_web.storage import model_metadata_store
@@ -40,24 +27,15 @@ CADDY_ADMIN = "http://localhost:2019"
 CERT_FILENAME = "llama_web-ca.crt"
 
 # Sensible fallbacks if a source is briefly unreachable, so the help still renders.
-_DEFAULT_PORTS = {"lmstudio": 8443, "lemonade": 8444, "vllm": 8445, "kobold": 8446}
+_DEFAULT_PORTS = {"llamacpp": 18471, "app": 18474, "engine": 18473}
 _UPSTREAM_BACKEND = {
-    "1234": "lmstudio",
-    "13307": "lmstudio",
-    # 13305 = Lemonade's own server; 13306 = lemonade_guard_shim.py, which Caddy's lemonade
-    # block now proxies to instead so a LAN request can't trigger the NPU-collision OOM that
-    # used to hit flm.service (see that module's docstring) — either upstream port means
-    # "this Caddy block is the lemonade one."
-    "13305": "lemonade", "13306": "lemonade",
-    "8000": "vllm", "5001": "kobold", "13308": "kobold",
-    # now proxies to instead so LAN clients get real tool_calls (see that module's docstring) —
+    "18474": "llamacpp",
+    "18473": "llamacpp",
 }
-_LABELS = {"lmstudio": "LM Studio", "lemonade": "Ryzen AI NPU", "vllm": "vLLM", "kobold": "KoboldCPP"}
-# FastFlowLM matches flm.service and stays below the NPU kernel limit, including
-# runtime padding. Lemonade uses its own context configuration.
-_CTX = {"llamacpp": 8192, "lmstudio": 32768, "lemonade": 65536, "vllm": 8192, "kobold": 8192, "q38rocm": 262144}
-_OUT = {"lmstudio": 8192, "lemonade": 8192, "vllm": 4096, "kobold": 4096}
-_BACKENDS = ("lmstudio", "lemonade", "vllm", "kobold")
+_LABELS = {"llamacpp": "Local llama.cpp engine", "opencode": "opencode.ai"}
+_CTX = {"llamacpp": 16384, "opencode": 262144}
+_OUT = {"llamacpp": 4096, "opencode": 8192}
+_BACKENDS = ("llamacpp", "opencode")
 _NON_CHAT = ("embedding", "embeddings", "transcription", "tts", "image", "video")
 
 def compaction_for_window(window: int) -> dict:
@@ -175,38 +153,6 @@ def _advertised_output(be: str, context: int, model_id: str | None = None) -> in
     narrower (e.g. 32768 context / 8192 output)."""
     out_cap = _OUT[be]
     return max(1, min(out_cap, context // 2))
-
-
-def flm_small_agent(model):
-    """A primary OpenCode agent with a small fixed prompt/tool footprint."""
-    return {
-        "description": "Coding with a compact prompt and tool set for FLM",
-        "mode": "primary", "model": model, "temperature": 0,
-        "prompt": (
-            "Complete the user's coding task in the current project. First read project "
-            "instructions (AGENTS.md), README, and the relevant package/build configuration. "
-            "Use project-relative paths such as src/module.py; never prepend a slash to a "
-            "relative path from README. Read README before searching. Use glob and grep to locate the entry points, implementation, and existing tests; "
-            "read the relevant code before drawing conclusions. Follow imports and callers "
-            "when needed. A test importing a function is not its implementation: follow the "
-            "import to the module defining that function. Fix the implementation, not the "
-            "test expectations, unless the user specifically asks to change tests. Preserve "
-            "the documented behavior and existing passing cases. Use the exact argument names from the offered tool schemas "
-            "(for example path versus filePath). Edit existing files with focused exact "
-            "replacements or apply_patch; use write to create new files. After an edit "
-            "mismatch, re-read the affected lines and retry a smaller replacement. Do not "
-            "repeat the same failed call. Preserve unrelated changes. Run the project's "
-            "relevant checks and inspect the diff. Continue until the requested work is "
-            "complete or report a concrete blocker. Do not claim checks passed unless "
-            "they ran. Once the requested change and verification are complete, give a "
-            "brief final answer and stop. Do not create unsolicited documentation or extra files."
-
-        ),
-        "permission": {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow",
-                       "list": "allow", "edit": "allow", "bash": "ask", "shell": "ask",
-                       "question": "allow", "skill": "allow", "lsp": "allow",
-                       "todowrite": "allow", "doom_loop": "ask"},
-    }
 
 
 def lan_ip() -> str:
@@ -367,7 +313,8 @@ def _all_models() -> list[dict]:
     # Broad excepts on purpose: this feeds a page render, so a backend being down (or a
     # client raising something unexpected) must degrade to "that backend's models are
     # absent", never a 500 on the whole page.
-    for client, name in ((lms, "lmstudio"), (lemonade, "lemonade"), (vllm, "vllm"), (kobold, "kobold"), (zen, "opencode")):
+    from llama_web.backends import llamacpp_client
+    for client, name in ((llamacpp_client, "llamacpp"), (zen, "opencode")):
         try:
             for m in client.list_models():
 
@@ -379,25 +326,16 @@ def _all_models() -> list[dict]:
 
 
 def _pick_default(chat_by_be: dict, loaded_by_be: dict, override: str | None = None) -> str | None:
-    """Default model for a LAN tool. An explicit `override` (Settings panel's "Default LAN
-    model", stored as settings_store's "lan_default_model") always wins, as long as it's
-    still actually available - a stale override pointing at a deleted/renamed model falls
-    straight through to the auto-pick below rather than sending a LAN tool a default that no
-    longer exists. Auto-pick otherwise prefers a model that's ALREADY LOADED so the tool's
-    first request is warm — Lemonade/vLLM serve one chat model at a time, and requesting an
-    unloaded one triggers an evict+load that can take ~a minute on the NPU and blow past the
-    tool's request timeout (the exact "OpenCode times out on LAN" symptom). Falls back to a
-    capable curated model, then to the first available, when nothing is loaded yet."""
+    """Default model for generated client configs. An explicit override wins while it
+    still exists; otherwise prefer the loaded llama.cpp model so the first request is warm."""
     if override:
         be, _, model_id = override.partition("/")
         if model_id in chat_by_be.get(be, []):
             return override
-    for be in ("lemonade", "vllm", "kobold", "lmstudio"):
+    for be in ("llamacpp", "opencode"):
         if loaded_by_be.get(be):
             return f"{be}/{loaded_by_be[be][0]}"
-    if "qwen3.6-moe-35b-a3b" in chat_by_be.get("lemonade", []):
-        return "lemonade/qwen3.6-moe-35b-a3b"
-    for be in ("lemonade", "vllm", "kobold", "lmstudio"):
+    for be in ("llamacpp", "opencode"):
         if chat_by_be.get(be):
             return f"{be}/{chat_by_be[be][0]}"
     return None
@@ -436,7 +374,7 @@ def build_continue_yaml(ip, token, ports, chat_by_be, embed_models, network_labe
 
     any_chat = False
     ctx_by_model = dict(ctx_by_model or {})
-    for be in ("lemonade", "vllm", "kobold", "lmstudio"):
+    for be in ("llamacpp",):
         if be not in ports:
             continue
         for mid in chat_by_be.get(be, []):
@@ -447,7 +385,7 @@ def build_continue_yaml(ip, token, ports, chat_by_be, embed_models, network_labe
     for em in embed_models:
         be = em["backend"]
         lines += entry(f"{em['id']} ({_LABELS.get(be, be)}, {network_label}) — embeddings for @codebase",
-                       em["id"], ports.get(be, next(iter(ports.values()), 8443)), None,
+                       em["id"], ports.get(be, next(iter(ports.values()), 18471)), None,
                        ["embed"], 30000)
     if not any_chat:
         lines.append("  # (no chat models downloaded yet — get one from the Downloads panel)")
@@ -467,7 +405,7 @@ def build_opencode_config(ip, token, ports, chat_by_be, loaded_by_be, default_ov
     if not context_settings["advertise_loaded"]:
         ctx_by_model = {}
     provider = {}
-    for be in ("lmstudio", "lemonade", "vllm", "kobold"):
+    for be in ("llamacpp",):
         models = {}
         for mid in chat_by_be.get(be, []):
             ctx = _advertised_context(be, mid, ctx_by_model, context_settings["fallback"])
@@ -475,40 +413,10 @@ def build_opencode_config(ip, token, ports, chat_by_be, loaded_by_be, default_ov
                 "name": f"{mid} ({_LABELS[be]}, {network_label})",
                 "limit": {"context": ctx, "output": _advertised_output(be, ctx, mid)},
             }
-            if be == "kobold":
-                # OpenCode can inherit a stale/negative tool capability from its
-                # model catalog. KoboldCPP's OpenAI endpoint supports tool calls,
-                # and llama_web's compatibility bridge handles its known quirks.
-                models[mid]["capabilities"] = {"tools": True}
         options = {
             "baseURL": f"https://{ip}:{ports[be]}/v1", "apiKey": token,
             "headers": {"X-llama_web-Client": "opencode"},
         }
-        if be == "lemonade":
-            # Admin-controlled via Settings ("lemonade_enable_thinking", default on) rather
-            # than hardcoded - disabling it didn't meaningfully speed up the Qwen3.8-27B
-            # NVFP4-MTP build (the real bottleneck is prefill time on a large/growing
-            # context, confirmed live via Lemonade's own timing logs), but it does trade
-            # away visibility into the model's reasoning, so this is a real tradeoff worth
-            # leaving switchable rather than deciding for every admin. OpenCode's bundled
-            # @ai-sdk/openai-compatible provider generically converts any
-            # `delta.reasoning_content` in the stream into a first-class "reasoning" stream
-            # part (confirmed by inspecting its compiled bundle - not gated behind a
-            # known-model allowlist), so turning this on lets OpenCode actually display the
-            # model's thinking instead of showing nothing during generation.
-            #
-            # options.extraBody is still how this app reaches OpenCode's direct-to-Lemonade
-            # traffic at all (confirmed via the same bundle inspection: it merges
-            # `this.config.extraBody` into every request) - app.py's own chat code never
-            # sees these requests, they go straight through Caddy. Harmless for any other
-            # Lemonade model: a chat template that doesn't read this kwarg just ignores it.
-            thinking = (settings_store.get("lemonade_enable_thinking") or "true") == "true"
-            options["extraBody"] = {
-                "enable_thinking": thinking,
-                "chat_template_kwargs": {"enable_thinking": thinking},
-                "reasoning_effort": "medium",
-            }
-
         provider[be] = {
             "npm": "@ai-sdk/openai-compatible",
             "name": f"{_LABELS[be]} ({network_label} via Caddy)",
@@ -655,7 +563,7 @@ def _build_uncached(app_port: int = 5443) -> dict:
         be: [m["id"] for m in models
              if m.get("backend") == be and m.get("type") not in _NON_CHAT
              and m.get("loadable") is not False]
-        for be in ("lmstudio", "lemonade", "vllm", "kobold")
+        for be in ("llamacpp",)
     }
     # Which chat models are already loaded, per backend — used to default a LAN tool to a
     # warm model so its first request doesn't pay the cold-load (evict+load) cost.
@@ -663,7 +571,7 @@ def _build_uncached(app_port: int = 5443) -> dict:
         be: [m["id"] for m in models
              if m.get("backend") == be and m.get("type") not in _NON_CHAT
              and m.get("loadable") is not False and m.get("state") == "loaded"]
-        for be in ("lmstudio", "lemonade", "vllm", "kobold")
+        for be in ("llamacpp",)
     }
     # A loaded model's active window is authoritative. A saved larger value only takes
     # effect on the next Load; advertising it early makes OpenCode send oversized turns.
@@ -683,13 +591,6 @@ def _build_uncached(app_port: int = 5443) -> dict:
         {"id": m["id"], "backend": m.get("backend")}
         for m in models if m.get("type") == "embeddings"
     ]
-    # Settings panel's "Default LAN model" (admin-set, "backend/model_id" shaped, empty =
-    # auto-pick). Real incident (2026-07-26): the NPU (Lemonade/qwen3.6-moe-35b-a3b) auto-pick
-    # was too slow for a large OpenCode coding turn and its client gave up waiting - this lets
-    # an admin point OpenCode at a faster backend without needing a code change every time the
-    # right default changes, while still auto-picking (NPU-first) when nothing is set.
-    default_override = settings_store.get("lan_default_model")
-
     # Tailscale: "enabled" gates whether the Help panel shows the Tailscale section at all —
     # an admin who doesn't use Tailscale can turn it off outright rather than just ignoring
     # it. The manual override exists because tailscale_ip() shells out to the `tailscale` CLI
@@ -713,42 +614,16 @@ def _build_uncached(app_port: int = 5443) -> dict:
         "settings": "/settings", "ca_cert": "/ca-cert",
     }.items()} if ts_app else {}
 
-    # None when no Tailscale IP is available, same fail-soft contract as everything else here.
-    ts_continue_yaml = None
-    ts_opencode_config = None
-    ts_ca_trust_commands = None
-    if ts_ip:
-        ts_continue_yaml = build_continue_yaml(
-            ts_ip, vscode_token, ports, chat_by_be, embed_models, network_label="Tailscale",
-            ctx_by_model=ctx_by_model,
-        )
-        ts_opencode_config = build_opencode_config(
-            ts_ip, opencode_token, ports, chat_by_be, loaded_by_be, default_override,
-            network_label="Tailscale", ctx_by_model=ctx_by_model,
-        )
-        # A device reachable only over Tailscale can't necessarily reach the LAN IP either —
-        # that's the whole point of needing Tailscale — so Step 1's CA-trust command (which
-        # fetches from this app's own LAN-addressed /ca-cert route) may not even be reachable
-        # for it. This app listens on 0.0.0.0, so the exact same route answers on the
-        # Tailscale IP too (confirmed live) — just needs its own copy of the command.
-        ts_ca_trust_commands = ca_trust_commands(ts_ip, app_port, base_url=ts_app)
-
-    support_warmup = settings_store.get("support_models_keep_loaded", "true") != "false"
-    flm_status = (
-        "Embedding and voice model warm-up is enabled."
-        if support_warmup else
-        "Embedding and voice model warm-up is disabled; those models load when their features are used."
-    )
+    # Tailscale devices need their own copy of the CA-trust command: the app listens on
+    # 0.0.0.0, so /ca-cert answers on the Tailscale address too.
+    ts_ca_trust_commands = ca_trust_commands(ts_ip, app_port, base_url=ts_app) if ts_ip else None
 
     return {
-        "flm_status": flm_status,
         "lan_ip": ip,
         "tailscale_ip": ts_ip,
         "tailscale_dns_name": ts_dns,
         "tailscale_app_url": ts_app,
         "tailscale_links": ts_links,
-        "tailscale_continue_yaml": ts_continue_yaml,
-        "tailscale_opencode_config": ts_opencode_config,
         "tailscale_ca_trust_commands": ts_ca_trust_commands,
         "lan_token": lan_token,
         "ports": ports,
@@ -757,10 +632,4 @@ def _build_uncached(app_port: int = 5443) -> dict:
                            "check the admin API at localhost:2019)",
         "ca_cert_ok": bool(cert),
         "ca_trust_commands": ca_trust_commands(ip, app_port),
-        "continue_yaml": build_continue_yaml(ip, vscode_token, ports, chat_by_be, embed_models,
-                                             ctx_by_model=ctx_by_model),
-        "opencode_config": build_opencode_config(
-            ip, opencode_token, ports, chat_by_be, loaded_by_be, default_override,
-            ctx_by_model=ctx_by_model,
-        ),
     }
