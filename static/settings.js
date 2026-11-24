@@ -1,89 +1,33 @@
 (() => {
 
+  const BACKEND_ORDER = ["llamacpp", "opencode"];
+  const BACKEND_LABELS = {
+    llamacpp: "llama.cpp engine",
+    opencode: "opencode.ai (remote)",
+  };
   const settingsForm = document.getElementById("settings-form");
-  const restartBackendsBtn = document.getElementById("restart-backends");
-  const restartQ38rocmBtn = document.getElementById("restart-q38rocm");
+  const restartEngineBtn = document.getElementById("restart-engine");
   const restartHearthBtn = document.getElementById("restart-llama-web");
   const restartResults = document.getElementById("restart-results");
   const restartStatusEl = document.getElementById("restart-status");
-  const restartHistoryEl = document.getElementById("restart-history");
-  const preserveMandatoryEl = document.getElementById("restart-preserve-mandatory");
+  const engineStatusEl = document.getElementById("engine-status");
 
-  async function loadRestartHistory() {
+  async function refreshEngineStatus() {
+    if (!engineStatusEl) return;
     try {
-      const res = await fetch("/api/admin/service-status");
+      const res = await fetch("/api/models");
       const data = await res.json();
-      if (restartHistoryEl && data.services) {
-        restartHistoryEl.innerHTML = "<strong>Service status:</strong><br/>" + data.services.map(s =>
-          `${escapeHtml(s.service)}: ${escapeHtml(s.status)}${s.detail ? " — " + escapeHtml(s.detail) : ""} (updated ${new Date(s.updated_at * 1000).toLocaleTimeString()})`
-        ).join("<br/>");
-      }
-      // Update dedicated Lemonade status display
-      const lemonadeStatusEl = document.getElementById("lemonade-sudo-status");
-      if (lemonadeStatusEl && data.services) {
-        const lemon = data.services.find(s => s.service.startsWith("Lemonade") && s.service !== "Lemonade");
-        if (lemon) {
-          const statusColor = lemon.status === "active" ? "green" : lemon.status === "inactive" ? "orange" : "gray";
-          lemonadeStatusEl.innerHTML = `Lemonade service: <span style="color:${statusColor}">${escapeHtml(lemon.service)}</span> — <span style="color:${statusColor}">${escapeHtml(lemon.status)}</span>${lemon.detail ? " — " + escapeHtml(lemon.detail) : ""}`;
-        }
-      }
-    } catch (e) { /* ignore */ }
+      if (!res.ok) throw new Error(data.error || "status unavailable");
+      const loaded = (data.models || []).filter((m) => m.backend === "llamacpp" && m.state === "loaded");
+      engineStatusEl.textContent = loaded.length
+        ? `llama.cpp engine: serving ${loaded.map((m) => m.id).join(", ")}`
+        : "llama.cpp engine: no model loaded";
+    } catch (err) {
+      engineStatusEl.textContent = `llama.cpp engine status unavailable: ${err.message}`;
+    }
   }
-  // Render per-backend start/stop controls
-  async function renderBackendControls() {
-    const container = document.getElementById("backend-controls");
-    if (!container) return;
-    try {
-      const res = await fetch("/api/admin/service-status");
-      const data = await res.json();
-      const services = data.services || [];
-      container.innerHTML = services.map(s => {
-        const name = escapeHtml(s.service);
-        const status = escapeHtml(s.status);
-        const canStart = s.status !== "started";
-        const canStop = s.status === "started";
-        return `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-          <span style="min-width: 120px;">${name}</span>
-          <span style="min-width: 80px; color: ${s.status === 'started' ? 'green' : s.status === 'error' ? 'red' : 'gray'};">${status}</span>
-          ${canStart ? `<button class="panel-btn backend-start-btn" data-backend="${name}" type="button">Start</button>` : ''}
-          ${canStop ? `<button class="panel-btn backend-stop-btn" data-backend="${name}" type="button">Stop</button>` : ''}
-        </div>`;
-      }).join("");
-      container.querySelectorAll(".backend-start-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
-          btn.disabled = true;
-          try {
-            const r = await fetch("/api/admin/start-backend", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]').content }, body: JSON.stringify({ backend: btn.dataset.backend }) });
-            const d = await r.json();
-            restartResults.textContent = d.message || (d.ok ? "Started" : "Failed");
-          } catch (e) { restartResults.textContent = `Error: ${e.message}`; }
-          renderBackendControls();
-          loadRestartHistory();
-        });
-      });
-      container.querySelectorAll(".backend-stop-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
-          btn.disabled = true;
-          try {
-            const r = await fetch("/api/admin/stop-backend", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]').content }, body: JSON.stringify({ backend: btn.dataset.backend }) });
-            const d = await r.json();
-            restartResults.textContent = d.message || (d.ok ? "Stopped" : "Failed");
-          } catch (e) { restartResults.textContent = `Error: ${e.message}`; }
-          renderBackendControls();
-          loadRestartHistory();
-        });
-      });
-    } catch (e) { container.textContent = `Could not load service status: ${e.message}`; }
-  }
-  renderBackendControls();
-
-  loadRestartHistory();
-
-  // Auto-refresh service status periodically for live labels
-  setInterval(() => {
-    loadRestartHistory();
-    renderBackendControls();
-  }, 5000);
+  refreshEngineStatus();
+  setInterval(refreshEngineStatus, 10000);
 
   async function pollRestartJob(jobId) {
     const interval = setInterval(async () => {
@@ -93,17 +37,15 @@
         if (restartStatusEl) {
           restartStatusEl.textContent = `${data.status}: ${data.progress}/${data.total} — ${data.detail || ""}`;
         }
-        // Refresh service labels live during restart
-        loadRestartHistory();
-        renderBackendControls();
         if (data.status === "done" || data.status === "error") {
           clearInterval(interval);
-          restartBackendsBtn.disabled = false;
+          restartEngineBtn.disabled = false;
           restartHearthBtn.disabled = false;
-          if (restartQ38rocmBtn) restartQ38rocmBtn.disabled = false;
         }
       } catch (e) {
         clearInterval(interval);
+        restartEngineBtn.disabled = false;
+        restartHearthBtn.disabled = false;
       }
     }, 1000);
   }
@@ -111,52 +53,40 @@
   async function adminAction(url, label) {
     if (!window.confirm(`${label}? This may interrupt active requests.`)) return;
     restartResults.textContent = `${label}…`;
-    restartBackendsBtn.disabled = true;
+    restartEngineBtn.disabled = true;
     restartHearthBtn.disabled = true;
-    if (restartQ38rocmBtn) restartQ38rocmBtn.disabled = true;
     try {
-      let body = {};
-      if (url === "/api/admin/restart-backends") {
-        const checked = [...document.querySelectorAll(".restart-backend-cb:checked")].map(cb => cb.value);
-        body = { backends: checked, preserve_mandatory: preserveMandatoryEl ? preserveMandatoryEl.checked : true };
-      }
-      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]').content }, body: JSON.stringify(body) });
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]').content,
+        },
+        body: "{}",
+      });
       const data = await response.json();
-      if (url.endsWith("restart-llama-web")) {
-        restartResults.textContent = data.message || "Hearth is restarting.";
-        if (data.job_id) pollRestartJob(data.job_id);
+      if (!response.ok) throw new Error(data.message || data.error || "restart failed");
+      restartResults.textContent = data.message || "Restart requested.";
+      if (data.job_id) {
+        pollRestartJob(data.job_id);
       } else {
-        restartResults.innerHTML = Object.entries(data).filter(([k]) => k !== "_job_id").map(([name, result]) => `<div>${escapeHtml(name)}: ${result.ok ? "Restart requested" : escapeHtml(result.message)}</div>`).join("");
-        if (data._job_id) pollRestartJob(data._job_id);
+        restartEngineBtn.disabled = false;
+        restartHearthBtn.disabled = false;
       }
+      setTimeout(refreshEngineStatus, 4000);
     } catch (error) {
       restartResults.textContent = `Could not complete ${label}: ${error.message}`;
-      restartBackendsBtn.disabled = false;
+      restartEngineBtn.disabled = false;
       restartHearthBtn.disabled = false;
-      if (restartQ38rocmBtn) restartQ38rocmBtn.disabled = false;
     }
   }
-  restartBackendsBtn?.addEventListener("click", () => adminAction("/api/admin/restart-backends", "Restart selected backends"));
-  restartQ38rocmBtn?.addEventListener("click", () => adminAction("/api/admin/restart-q38rocm", "Restart q38rocm"));
-  restartHearthBtn?.addEventListener("click", () => adminAction("/api/admin/restart-llama-web", "Restart Hearth"));
-  const settingsLmstudioUrlEl = document.getElementById("settings-lmstudio-url");
-  const settingsLmstudioKeyEl = document.getElementById("settings-lmstudio-key");
-  const settingsLemonadeUrlEl = document.getElementById("settings-lemonade-url");
-  const settingsLemonadeKeyEl = document.getElementById("settings-lemonade-key");
-  const settingsVllmUrlEl = document.getElementById("settings-vllm-url");
-  const settingsVllmKeyEl = document.getElementById("settings-vllm-key");
+  restartEngineBtn?.addEventListener("click", () => adminAction("/api/admin/restart-engine", "Restart llama.cpp engine"));
+  restartHearthBtn?.addEventListener("click", () => adminAction("/api/admin/restart-llama-web", "Restart llama-web"));
   const settingsOpencodeUrlEl = document.getElementById("settings-opencode-url");
   const settingsOpencodePlanEl = document.getElementById("settings-opencode-plan");
   const settingsOpencodeKeyEl = document.getElementById("settings-opencode-key");
-  const settingsKoboldUrlEl = document.getElementById("settings-kobold-url");
-  const settingsKoboldKeyEl = document.getElementById("settings-kobold-key");
-  const settingsKoboldGpuLayersEl = document.getElementById("settings-kobold-gpu-layers");
-  const settingsKoboldDraftModelEl = document.getElementById("settings-kobold-draft-model");
-  const settingsKoboldDraftAmountEl = document.getElementById("settings-kobold-draft-amount");
 
 
-  const settingsQ38rocmUrlEl = document.getElementById("settings-q38rocm-url");
-  const settingsQ38rocmKeyEl = document.getElementById("settings-q38rocm-key");
   const settingsDefaultModelEl = document.getElementById("settings-default-model");
   const settingsWebSearchEnabledEl = document.getElementById("settings-web-search-enabled");
   const settingsWebSearchModeEl = document.getElementById("settings-web-search-mode");
@@ -166,12 +96,6 @@
   const settingsWebSearchBrowserEnabledEl = document.getElementById("settings-web-search-browser-enabled");
   const settingsCaddyInfoEl = document.getElementById("settings-caddy-info");
   const settingsSaveBtn = document.getElementById("settings-save-btn");
-  const settingsTestLmstudioBtn = document.getElementById("settings-test-lmstudio");
-  const settingsTestLmstudioResultEl = document.getElementById("settings-test-lmstudio-result");
-  const settingsTestLemonadeBtn = document.getElementById("settings-test-lemonade");
-  const settingsTestLemonadeResultEl = document.getElementById("settings-test-lemonade-result");
-  const settingsTestVllmBtn = document.getElementById("settings-test-vllm");
-  const settingsTestVllmResultEl = document.getElementById("settings-test-vllm-result");
   const settingsTestOpencodeBtn = document.getElementById("settings-test-opencode");
   const opencodePlanDefaults = {
     payg: "https://opencode.ai/inference/openai",
@@ -188,23 +112,10 @@
   }
   const settingsTestOpencodeResultEl = document.getElementById("settings-test-opencode-result");
   const opencodeClearKeyBtn = document.getElementById("opencode-clear-key");
-  const settingsTestKoboldBtn = document.getElementById("settings-test-kobold");
-  const settingsTestKoboldResultEl = document.getElementById("settings-test-kobold-result");
-  const settingsTestQ38rocmBtn = document.getElementById("settings-test-q38rocm");
-  const settingsTestQ38rocmResultEl = document.getElementById("settings-test-q38rocm-result");
-  const settingsTestCaddyLmstudioBtn = document.getElementById("settings-test-caddy-lmstudio");
-  const settingsTestCaddyLemonadeBtn = document.getElementById("settings-test-caddy-lemonade");
-  const settingsTestCaddyVllmBtn = document.getElementById("settings-test-caddy-vllm");
-  const settingsTestCaddyKoboldBtn = document.getElementById("settings-test-caddy-kobold");
   const settingsTestCaddyResultEl = document.getElementById("settings-test-caddy-result");
-  const settingsLemonadeThinkingEl = document.getElementById("settings-lemonade-thinking");
   const settingsTailscaleDetectedEl = document.getElementById("settings-tailscale-detected");
   const settingsTailscaleEnabledEl = document.getElementById("settings-tailscale-enabled");
   const settingsTailscaleIpOverrideEl = document.getElementById("settings-tailscale-ip-override");
-  const settingsTestTailscaleLmstudioBtn = document.getElementById("settings-test-tailscale-lmstudio");
-  const settingsTestTailscaleLemonadeBtn = document.getElementById("settings-test-tailscale-lemonade");
-  const settingsTestTailscaleVllmBtn = document.getElementById("settings-test-tailscale-vllm");
-  const settingsTestTailscaleKoboldBtn = document.getElementById("settings-test-tailscale-kobold");
   const settingsTestTailscaleResultEl = document.getElementById("settings-test-tailscale-result");
   const settingsChatDefaultMaxTokensEl = document.getElementById("settings-chat-default-max-tokens");
   const settingsChatMaxMaxTokensEl = document.getElementById("settings-chat-max-max-tokens");
@@ -261,7 +172,14 @@
         // `quantization` is normalized by each client to the actual compute path when
         // known (NPU, GPU, CPU). This prevents an "-NPU" marketing/model name from being
         // mistaken for NPU execution when Lemonade reports a llamacpp/GPU recipe.
-        opt.textContent = `${m.id} — ${compute}${m.state === "loaded" ? " · loaded" : ""}`;
+        const quantization = String(m.quantization || m.compatibility_type || "").toLowerCase();
+        const compute = quantization.includes("npu") ? "NPU"
+          : quantization.includes("gpu") || quantization.includes("vulkan") ? "GPU" : "GGUF";
+        const maxContext = Number(m.max_context_length || m.context_window_tokens || 0);
+        const contextLabel = maxContext > 0
+          ? ` · ${maxContext >= 1_000_000 ? (maxContext / 1_000_000).toFixed(1) + "M" : Math.round(maxContext / 1024) + "K"} ctx`
+          : "";
+        opt.textContent = `${m.name || m.id} — ${compute}${contextLabel}${m.state === "loaded" ? " · loaded" : ""}`;
         group.appendChild(opt);
       }
       settingsDefaultModelEl.appendChild(group);
@@ -286,24 +204,11 @@
   }
 
   function applySettings(data) {
-    settingsLmstudioUrlEl.value = data.lmstudio_base_url || "";
-    settingsLmstudioKeyEl.value = data.lmstudio_api_key || "";
-    settingsLemonadeUrlEl.value = data.lemonade_base_url || "";
-    settingsLemonadeKeyEl.value = data.lemonade_api_key || "";
-    settingsVllmUrlEl.value = data.vllm_base_url || "";
-    settingsVllmKeyEl.value = data.vllm_api_key || "";
     settingsOpencodePlanEl.value = data.opencode_api_plan === "payg" ? "payg" : "go";
     settingsOpencodeUrlEl.value = data.opencode_api_base_url || opencodePlanDefaults[settingsOpencodePlanEl.value];
     settingsOpencodeKeyEl.value = data.opencode_api_key || "";
-    settingsKoboldUrlEl.value = data.kobold_base_url || "";
-    settingsKoboldKeyEl.value = data.kobold_api_key || "";
-    settingsKoboldGpuLayersEl.value = data.kobold_gpu_layers || "";
-    settingsKoboldDraftModelEl.value = data.kobold_draft_model || "";
-    settingsKoboldDraftAmountEl.value = data.kobold_draft_amount || "";
 
 
-    settingsQ38rocmUrlEl.value = data.q38rocm_base_url || "";
-    settingsQ38rocmKeyEl.value = data.q38rocm_api_key || "";
     savedDefaultModel = data.lan_default_model || "";
     renderDefaultModelSelect();
     settingsWebSearchEnabledEl.checked = data.web_search_enabled !== false;
@@ -325,7 +230,6 @@
     settingsOpencodeAdvertiseLoadedContextEl.checked = data.opencode_advertise_loaded_context ?? true;
     settingsOpencodeContextFallbackEl.value = data.opencode_context_fallback ?? "";
 
-    settingsLemonadeThinkingEl.checked = data.lemonade_enable_thinking !== false;
 
     settingsTailscaleEnabledEl.checked = data.tailscale_enabled !== false;
     settingsTailscaleIpOverrideEl.value = data.tailscale_ip_override || "";
@@ -338,13 +242,9 @@
     } else {
       const lines = [];
       if (data.caddy.bearer_token) lines.push(`Bearer token: ${data.caddy.bearer_token}`);
-      if (data.caddy.ports?.lmstudio) lines.push(`LM Studio LAN port: ${data.caddy.ports.lmstudio}`);
-      if (data.caddy.ports?.lemonade) lines.push(`Ryzen AI LAN port: ${data.caddy.ports.lemonade}`);
-      if (data.caddy.ports?.vllm) lines.push(`vLLM LAN port: ${data.caddy.ports.vllm}`);
-      if (data.caddy.ports?.kobold) lines.push(`KoboldCPP LAN port: ${data.caddy.ports.kobold}`);
       settingsCaddyInfoEl.innerHTML = lines.length
         ? lines.map((l) => escapeHtml(l)).join("<br>")
-        : "Caddyfile found, but no recognized LM Studio/Lemonade proxy blocks in it.";
+        : "Caddyfile found; LAN access proxies to the llama-web app.";
     }
   }
 
@@ -380,25 +280,12 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lmstudio_base_url: settingsLmstudioUrlEl.value.trim(),
-          lmstudio_api_key: settingsLmstudioKeyEl.value.trim(),
-          lemonade_base_url: settingsLemonadeUrlEl.value.trim(),
-          lemonade_api_key: settingsLemonadeKeyEl.value.trim(),
-          vllm_base_url: settingsVllmUrlEl.value.trim(),
-          vllm_api_key: settingsVllmKeyEl.value.trim(),
           opencode_api_plan: settingsOpencodePlanEl.value,
           opencode_api_base_url: opencodeOverrideToSend(),
           // only send a non-empty key; sending the empty field must not erase
           // a stored credential (explicit removal uses opencode_api_clear)
           ...(settingsOpencodeKeyEl.value.trim() ? {opencode_api_key: settingsOpencodeKeyEl.value.trim()} : {}),
-          kobold_base_url: settingsKoboldUrlEl.value.trim(),
-          kobold_api_key: settingsKoboldKeyEl.value.trim(),
-          kobold_gpu_layers: settingsKoboldGpuLayersEl.value.trim(),
-          kobold_draft_model: settingsKoboldDraftModelEl.value.trim(),
-          kobold_draft_amount: settingsKoboldDraftAmountEl.value.trim(),
 
-          q38rocm_base_url: settingsQ38rocmUrlEl.value.trim(),
-          q38rocm_api_key: settingsQ38rocmKeyEl.value.trim(),
           lan_default_model: settingsDefaultModelEl.value,
           chat_default_max_tokens: numOrNull(settingsChatDefaultMaxTokensEl),
           chat_max_max_tokens: numOrNull(settingsChatMaxMaxTokensEl),
@@ -410,7 +297,6 @@
           opencode_compaction_auto: settingsOpencodeCompactionAutoEl.checked,
           opencode_advertise_loaded_context: settingsOpencodeAdvertiseLoadedContextEl.checked,
           opencode_context_fallback: numOrNull(settingsOpencodeContextFallbackEl),
-          lemonade_enable_thinking: settingsLemonadeThinkingEl.checked,
           web_search_enabled: settingsWebSearchEnabledEl.checked,
           web_search_mode: settingsWebSearchModeEl.value,
           web_search_max_results: Number(settingsWebSearchMaxResultsEl.value),
@@ -455,30 +341,21 @@
     }
   }
 
-  settingsTestLmstudioBtn.addEventListener("click", () =>
-    runTest(settingsTestLmstudioBtn, settingsTestLmstudioResultEl, "lmstudio", {
-      base_url: settingsLmstudioUrlEl.value.trim(),
-      api_key: settingsLmstudioKeyEl.value.trim(),
-    })
-  );
-  settingsTestLemonadeBtn.addEventListener("click", () =>
-    runTest(settingsTestLemonadeBtn, settingsTestLemonadeResultEl, "lemonade", {
-      base_url: settingsLemonadeUrlEl.value.trim(),
-      api_key: settingsLemonadeKeyEl.value.trim(),
-    })
-  );
 
-  settingsTestQ38rocmBtn.addEventListener("click", () =>
-    runTest(settingsTestQ38rocmBtn, settingsTestQ38rocmResultEl, "q38rocm", {
-      base_url: settingsQ38rocmUrlEl.value.trim(),
-      api_key: settingsQ38rocmKeyEl.value.trim(),
-    })
+  const settingsTestLlamacppBtn = document.getElementById("settings-test-llamacpp");
+  const settingsTestLlamacppResultEl = document.getElementById("settings-test-llamacpp-result");
+  settingsTestLlamacppBtn.addEventListener("click", () =>
+    runTest(settingsTestLlamacppBtn, settingsTestLlamacppResultEl, "llamacpp", {})
   );
-  settingsTestVllmBtn.addEventListener("click", () =>
-    runTest(settingsTestVllmBtn, settingsTestVllmResultEl, "vllm", {
-      base_url: settingsVllmUrlEl.value.trim(),
-      api_key: settingsVllmKeyEl.value.trim(),
-    })
+  const settingsTestCaddyLlamacppBtn = document.getElementById("settings-test-caddy-llamacpp");
+  const settingsTestCaddyLlamacppResultEl = document.getElementById("settings-test-caddy-llamacpp-result");
+  const settingsTestTailscaleLlamacppBtn = document.getElementById("settings-test-tailscale-llamacpp");
+  const settingsTestTailscaleLlamacppResultEl = document.getElementById("settings-test-tailscale-llamacpp-result");
+  settingsTestCaddyLlamacppBtn.addEventListener("click", () =>
+    runTest(settingsTestCaddyLlamacppBtn, settingsTestCaddyLlamacppResultEl, "caddy_llamacpp", {})
+  );
+  settingsTestTailscaleLlamacppBtn.addEventListener("click", () =>
+    runTest(settingsTestTailscaleLlamacppBtn, settingsTestTailscaleLlamacppResultEl, "tailscale_llamacpp", {})
   );
   settingsTestOpencodeBtn.addEventListener("click", async () => {
     // opencode.ai is configured by the key alone, so testing is configuring:
@@ -541,40 +418,6 @@
       opencodeClearKeyBtn.disabled = false;
     }
   });
-  settingsTestKoboldBtn.addEventListener("click", () =>
-    runTest(settingsTestKoboldBtn, settingsTestKoboldResultEl, "kobold", {
-      base_url: settingsKoboldUrlEl.value.trim(),
-      api_key: settingsKoboldKeyEl.value.trim(),
-    })
-  );
-    })
-  );
-  settingsTestCaddyVllmBtn.addEventListener("click", () =>
-    runTest(settingsTestCaddyVllmBtn, settingsTestCaddyResultEl, "caddy_vllm", {})
-  );
-  settingsTestCaddyKoboldBtn.addEventListener("click", () =>
-    runTest(settingsTestCaddyKoboldBtn, settingsTestCaddyResultEl, "caddy_kobold", {})
-  );
-  );
-  settingsTestCaddyLmstudioBtn.addEventListener("click", () =>
-    runTest(settingsTestCaddyLmstudioBtn, settingsTestCaddyResultEl, "caddy_lmstudio", {})
-  );
-  settingsTestCaddyLemonadeBtn.addEventListener("click", () =>
-    runTest(settingsTestCaddyLemonadeBtn, settingsTestCaddyResultEl, "caddy_lemonade", {})
-  );
-  settingsTestTailscaleLmstudioBtn.addEventListener("click", () =>
-    runTest(settingsTestTailscaleLmstudioBtn, settingsTestTailscaleResultEl, "tailscale_lmstudio", {})
-  );
-  settingsTestTailscaleLemonadeBtn.addEventListener("click", () =>
-    runTest(settingsTestTailscaleLemonadeBtn, settingsTestTailscaleResultEl, "tailscale_lemonade", {})
-  );
-  settingsTestTailscaleVllmBtn.addEventListener("click", () =>
-    runTest(settingsTestTailscaleVllmBtn, settingsTestTailscaleResultEl, "tailscale_vllm", {})
-  );
-  settingsTestTailscaleKoboldBtn.addEventListener("click", () =>
-    runTest(settingsTestTailscaleKoboldBtn, settingsTestTailscaleResultEl, "tailscale_kobold", {})
-  );
-  );
 
   fetchSettings();
   fetchModelsForDefault();

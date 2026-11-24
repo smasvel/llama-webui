@@ -36,9 +36,10 @@
         <div class="console-head">
           <h1>Models</h1>
           <p class="hint">
-            Browse local models and online models in separate sections, grouped by backend. Local chat models
-            can be loaded, unloaded, and deleted; media models load automatically when requested. Need a different
-            model? Upload a local GGUF here or get one from the <a href="{{ url_for('downloads_page') }}">Downloads page</a>.
+            Browse GGUF models served by the local llama.cpp engine from the llama-web model library.
+            Models can be loaded, unloaded, and deleted here.
+            Need a different model? Upload a local GGUF here or get one from the
+            <a href="{{ url_for('downloads_page') }}">Downloads page</a>.
           </p>
         </div>
 
@@ -52,7 +53,7 @@
 
         <section id="local-model-tools" class="console-card span-all" aria-labelledby="local-model-upload-heading">
           <h2 id="local-model-upload-heading">Upload a local GGUF model</h2>
-          <p class="hint">Browse for a GGUF file on this device. llama-web uploads it to local model storage and registers it with the configured Lemonade server. The file remains on this host so Lemonade can load it.</p>
+          <p class="hint">Browse for a GGUF file on this device. llama-web stores it in the local model library, where the llama.cpp engine can load it. The file remains on this host.</p>
           <form id="local-model-upload-form" class="download-form">
             <div class="download-row">
               <input id="local-model-file" class="panel-input" type="file" accept=".gguf,application/octet-stream" required />

@@ -17,6 +17,13 @@
   const localUploadStatus = el("local-model-upload-status");
   const localUploadProgress = el("local-model-upload-progress");
 
+  function displayName(m) {
+    if (m.name && m.name !== m.id) return m.name;
+    const raw = String(m.id || "");
+    const base = raw.split("/").pop() || raw;
+    return base.replace(/\.gguf$/i, "");
+  }
+
   function formatBytes(n) {
     if (n == null) return "";
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
@@ -24,7 +31,7 @@
     return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
   }
 
-  function copyableField(text, label, title) {
+  function copyableField(text, label, title, copyText = text) {
     const wrap = document.createElement("span");
     wrap.className = "model-copyable-field";
     const span = document.createElement("span");
@@ -39,7 +46,7 @@
     copyBtn.title = `Copy ${label}`;
     copyBtn.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(copyText);
         copyBtn.textContent = "copied";
         setTimeout(() => { copyBtn.textContent = "copy"; }, 1200);
       } catch {
@@ -97,17 +104,14 @@
   }
 
   const GROUPS = [
-    { key: "lmstudio", label: "LM Studio" },
-    { key: "lemonade", label: "Ryzen AI (NPU)" },
-    { key: "vllm", label: "vLLM" },
-
+    { key: "llamacpp", label: "llama.cpp engine (local GGUF library)" },
     { key: "opencode", label: "opencode.ai (remote)" },
-    { key: "kobold", label: "KoboldCPP" },
-    { key: "q38rocm", label: "q38rocm (Qwen 3.8 27B)" },
-    { key: "wan22", label: "Video generation" },
   ];
   const LABEL = Object.fromEntries(GROUPS.map((g) => [g.key, g.label]));
   const NON_CHAT = ["embeddings", "transcription", "tts", "image", "video"];
+  // Both llama.cpp services are started on demand: a stopped service means the next
+  // Load is a cold start, so make that state unmistakable on the card.
+  const ON_DEMAND_BACKENDS = new Set(["llamacpp"]);
 
   let models = [];
   let activeView = "local";
@@ -132,10 +136,9 @@
     toastEl.style.display = "block";
     toastEl.style.borderColor = isErr ? "var(--danger)" : "var(--border)";
     clearTimeout(toastTimer);
-    // persist=true skips the auto-hide — used for long-running ops (a cold vLLM/KoboldCPP/
-    // leave the page looking idle/hung for the rest of the wait. Real user report: a working
-    // 91s vLLM cold-start looked exactly like a failure because of this — the toast disappeared
-    // almost immediately and nothing else in the UI changed until the request finally resolved.
+    // persist=true skips the auto-hide — used for long-running service starts so the page
+    // doesn't look idle/hung for the rest of the wait. A cold llama.cpp start can take minutes;
+    // a disappearing toast made a successful load look like a failure.
     if (!persist) toastTimer = setTimeout(() => { toastEl.style.display = "none"; }, 4000);
   }
 
@@ -162,13 +165,13 @@
 
   function renderSummary() {
     const loaded = models.filter((m) => m.backend !== "opencode" && m.state === "loaded");
-    const onDisk = models.filter((m) => m.backend !== "opencode" && (m.backend !== "wan22" || m.assets_ready));
+    const onDisk = models.filter((m) => m.backend === "llamacpp");
     const chip = (val, label) =>
       `<div class="model-sum-chip"><div class="model-sum-val">${val}</div><div class="model-sum-label">${esc(label)}</div></div>`;
     let loadedHtml = "";
     if (loaded.length) {
       loadedHtml = `<div class="model-loaded-now"><span class="hint">Loaded now:</span> ` +
-        loaded.map((m) => `<span class="model-loaded-pill" title="${esc(m.backend)}">${esc(m.id)} <span class="hint">· ${esc(LABEL[m.backend] || m.backend)}</span></span>`).join(" ") +
+        loaded.map((m) => `<span class="model-loaded-pill" title="${esc(m.id)}">${esc(displayName(m))} <span class="hint">· ${esc(LABEL[m.backend] || m.backend)}</span></span>`).join(" ") +
         `</div>`;
     }
     summaryEl.innerHTML =
@@ -182,37 +185,30 @@
 
   function card(m) {
     const loaded = m.state === "loaded";
-    const isWanVideoModel = m.backend === "wan22";
-    const managedAutomatically = false;
-    const externallyManaged = m.externally_managed === true;
+    const stopped = !loaded && ON_DEMAND_BACKENDS.has(m.backend);
     const isBusy = m.id === busyModelId || m.download_state === "downloading";
     const size = fmtSize(m.size_gb);
-    const backendLabel = loaded && m.backend !== "opencode" ? LABEL[m.backend] || m.backend : "";
+    const backendLabel = loaded ? LABEL[m.backend] || m.backend : "";
     const metaParts = [backendLabel, m.publisher, m.quantization, m.type, size].filter(Boolean);
     const meta = metaParts.map(esc).join(" · ");
     const c = document.createElement("div");
-    c.className = "model-card2" + (loaded ? " loaded" : "") + (isBusy ? " busy" : "");
+    c.className = "model-card2" + (loaded ? " loaded" : "") + (stopped ? " stopped" : "") + (isBusy ? " busy" : "");
     c.dataset.name = (m.id || "").toLowerCase();
-    const unavailable = m.loadable === false;
-    const downloadIncomplete = m.download_incomplete === true;
-    const wanBadge = isWanVideoModel
-      ? m.download_state === "downloading"
-        ? `<span class="badge loading">downloading model…</span>`
-        : !m.runtime_available
-          ? `<span class="badge not-loaded">runtime unavailable</span>`
-          : m.assets_ready
-            ? `<span class="badge ready">ready · loads per request</span>`
-            : m.download_state === "error"
-              ? `<span class="badge not-loaded">download failed</span>`
-              : `<span class="badge not-loaded">model files missing</span>`
-      : null;
-    const badge = isBusy && !isWanVideoModel
+    const badge = isBusy
       ? `<span class="badge loading">${esc(busyLabel)}…</span>`
-      : wanBadge || `<span class="badge ${loaded ? "loaded" : "not-loaded"}">${managedAutomatically ? (loaded ? "loaded · ready" : "service unavailable") : (loaded ? "loaded" : (downloadIncomplete ? "download incomplete" : (unavailable ? "converted · kernels pending" : "not loaded")))}</span>`;
+      : loaded
+        ? `<span class="badge loaded">${m.backend === "opencode" ? "online · remote" : "running"}</span>`
+        : stopped
+          ? `<span class="badge stopped">stopped · not running</span>`
+          : `<span class="badge not-loaded">not loaded</span>`;
+    const stoppedNote = stopped
+      ? `<div class="model-stopped-note">${esc(LABEL[m.backend] || m.backend)} service is stopped — this model is not running. Load to start it.</div>`
+      : "";
     c.innerHTML =
       `<div class="model-card2-main">
-        <div class="model-card2-name" title="${esc(m.id)}">${esc(m.id)}</div>
+        <div class="model-card2-name" title="${esc(m.id)}">${esc(displayName(m))}</div>
         <div class="model-card2-meta">${meta || "&nbsp;"}</div>
+        ${stoppedNote}
       </div>
       ${badge}
       <div class="model-card2-actions"></div>`;
@@ -236,19 +232,18 @@
         model_max: "Maximum context reported by the model backend.",
         loaded_runtime: "Current loaded runtime context; the model may support a larger window.",
         configured: "Context length configured for this model or runtime.",
-        backend_default: "Hearth's default context for this backend; the model's actual maximum is not reported.",
+        backend_default: "llama-web's default context for this backend; the model's actual maximum is not reported.",
       }[m.context_window_source] || "Context length reported by the backend.";
       contextLabel.title = sourceText;
       metaEl.appendChild(contextLabel);
       metaEl.append(document.createTextNode(" · "));
     }
-    // Editable served context for backends that take ctx-size at load time. The saved
-    // value is reused on every later Load, so an unloaded model keeps the chosen window.
-    const contextEditable = m.context_editable === true || ["lemonade", "lmstudio", "vllm", "kobold", "q38rocm"].includes(m.backend);
+    // The saved value is reused on every later Load, so an unloaded model keeps its window.
+    const contextEditable = m.context_editable === true || m.backend === "llamacpp";
     if (contextEditable && m.type && !NON_CHAT.includes(m.type) && m.type !== "embedding") {
       const activeContext = Number(m.configured_context_length || m.loaded_context_length || m.context_window_tokens);
       const loadedContext = Number(m.loaded_context_length);
-      const maxContext = Number(m.max_context_length || m.context_window_tokens);
+      const maxContext = Number(m.safe_context_length || m.max_context_length || m.context_window_tokens);
       if (Number.isSafeInteger(activeContext) && activeContext > 0) {
         const ctxField = document.createElement("span");
         ctxField.className = "model-copyable-field";
@@ -270,18 +265,15 @@
         }
         ctxInput.setAttribute("aria-label", `Context size in tokens for ${m.id}`);
         ctxInput.addEventListener("focus", () => { isEditingContext = true; });
-      ctxInput.addEventListener("blur", () => { isEditingContext = false; });
-      ctxInput.addEventListener("change", () => { isEditingContext = false; updateContextLength(m, ctxInput); });
+        ctxInput.addEventListener("blur", () => { isEditingContext = false; });
+        ctxInput.addEventListener("change", () => { isEditingContext = false; updateContextLength(m, ctxInput); });
         ctxField.append(fieldLabel, ctxInput);
         metaEl.appendChild(ctxField);
       }
     }
-    metaEl.appendChild(copyableField(m.id, "model name", `Copy model id: ${m.id}`));
+    metaEl.appendChild(copyableField(displayName(m), "model id", `Full model id: ${m.id}`, m.id));
     const actions = c.querySelector(".model-card2-actions");
     if (m.resource_warning) {
-      // The warning sits inside the same actions row as the Load button — above it,
-      // spanning the row — so the text is read before the click instead of being
-      // collapsed below the card where it was easy to miss. Evidence stays collapsed.
       const warning = m.resource_warning;
       const box = document.createElement("div");
       box.className = "model-load-warning";
@@ -330,64 +322,22 @@
       box.append(label, message, copyBtn);
       actions.appendChild(box);
     }
-    // Disabled (not just hidden) while this specific card has an operation in flight, so a
-    // into a second, conflicting request — the card visibly shows why the buttons are inert
-    // instead of just silently no-op'ing like the old `busy` guard alone did.
-    if (isWanVideoModel) {
+    if (m.backend === "opencode") {
       const note = document.createElement("span");
       note.className = "hint";
-      if (!m.runtime_available) {
-        note.textContent = "The sd.cpp runtime in the Lemonade container is unavailable.";
-      } else if (m.download_state === "downloading") {
-        note.textContent = "Downloading the model, VAE, and text encoder into Lemonade's shared cache…";
-      } else if (m.assets_ready) {
-        note.textContent = "Ready. sd.cpp loads the weights for each video generation, then releases them.";
-      } else {
-        note.textContent = m.load_error || `About ${m.expected_size_gb} GB is downloaded on first use.`;
-      }
+      note.textContent = "Hosted by opencode.ai — select it in Chat to use it. No local load or delete is needed.";
       actions.appendChild(note);
-      if (m.runtime_available && !m.assets_ready && m.download_state !== "downloading") {
-        actions.appendChild(btn("Download model", "primary", () => prepareWan22Model(m), isBusy));
-      }
-    } else if (externallyManaged) {
-      const note = document.createElement("span");
-      note.className = "hint";
-      note.textContent = m.management_hint || "";
-      actions.appendChild(note);
-    } else if (managedAutomatically) {
-      const note = document.createElement("span");
-      note.className = "hint";
-      note.textContent = "Auto-loaded when a video is requested";
-      actions.appendChild(note);
-    } else if (loaded) {
-      actions.appendChild(btn("Unload", "", () => unloadModel(m.id), isBusy));
-    } else if (downloadIncomplete) {
-      const note = document.createElement("span");
-      note.className = "hint";
-      note.textContent = m.load_error || "Finish downloading this model before loading it.";
-      note.title = note.textContent;
-      actions.appendChild(note);
-      actions.appendChild(btn("Open Downloads", "", () => window.location.assign("/downloads"), isBusy));
-    } else if (unavailable) {
-      const note = document.createElement("span");
-      note.className = "hint";
-      note.textContent = m.load_error || "Runtime support is not ready.";
-      note.title = note.textContent;
-      actions.appendChild(note);
-      // Keep the safety gate, but do not render a dead control. A disabled button
-      // emits no click event and gave admins no feedback at all. The server also
-      // performs this preflight before unloading anything; this client-side response
-      // simply makes the blocker immediate and visible.
-      actions.appendChild(btn("Load", "primary", () => {
-        toast(`Cannot load ${m.id}: ${m.load_error || "runtime support is not ready"}`, true, true);
-      }, false));
-    } else {
-      actions.appendChild(btn("Load", "primary", () => loadModel(m.id), isBusy));
+      return c;
     }
-    if (!managedAutomatically && !externallyManaged && m.type !== "embeddings" && m.deletable !== false) {
+    if (loaded) {
+      actions.appendChild(btn("Unload", "", () => unloadModel(m.id), isBusy));
+    } else {
+      actions.appendChild(btn(stopped ? "Start & load" : "Load", "primary", () => loadModel(m.id), isBusy));
+    }
+    if (m.deletable !== false) {
       actions.appendChild(btn("Delete", "danger", () => deleteModel(m.id), isBusy));
     }
-    if (["lemonade", "lmstudio", "q38rocm"].includes(m.backend) && !NON_CHAT.includes(m.type) && m.type !== "embedding") {
+    if (m.backend === "llamacpp" && m.type && !NON_CHAT.includes(m.type) && m.type !== "embedding") {
       const thinkingLabel = document.createElement("label");
       thinkingLabel.className = "model-thinking-toggle";
       const thinkingInput = document.createElement("input");
@@ -399,7 +349,7 @@
       thinkingLabel.append(thinkingInput, document.createTextNode(" Enable thinking"));
       actions.appendChild(thinkingLabel);
     }
-    if (!managedAutomatically && !unavailable && m.testable !== false && !NON_CHAT.includes(m.type) && m.type !== "embedding") {
+    if (!unavailableGuard(m) && m.testable !== false && !NON_CHAT.includes(m.type) && m.type !== "embedding") {
       actions.appendChild(btn("Test Model", "", () => {
         window.location.assign(`/model-tests?backend=${encodeURIComponent(m.backend)}&model=${encodeURIComponent(m.id)}&action=test-model`);
       }, isBusy));
@@ -410,25 +360,10 @@
     return c;
   }
 
-  async function prepareWan22Model(model) {
-    if (busy) return;
-    const stopTicker = startBusyOp(model.id, "Preparing", "Starting Wan 2.2 model download…");
-    try {
-      const res = await fetch("/api/models/wan22/prepare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "could not start the model download");
-      toast("Wan 2.2 files are downloading. This card will show when the model is ready.");
-    } catch (err) {
-      toast(`Could not prepare Wan 2.2: ${err.message}`, true);
-    } finally {
-      endBusyOp(stopTicker);
-      fetchModels();
-    }
+  function unavailableGuard(m) {
+    return m.loadable === false || m.management_hint;
   }
+
   async function setModelThinking(model, input) {
     input.disabled = true;
     try {
@@ -506,7 +441,7 @@
     const isLoadedLocal = (m) => activeView === "local" && m.state === "loaded";
     const remaining = matching.filter((m) => !isLoadedLocal(m));
     const sections = [
-      { label: "Loaded models", list: matching.filter(isLoadedLocal) },
+      ...(activeView === "local" ? [{ label: "Loaded models", list: matching.filter(isLoadedLocal) }] : []),
       ...ordered.map((g) => ({ label: g.label, list: remaining.filter((m) => m.backend === g.key) })),
     ];
     for (const { label, list } of sections) {
@@ -525,8 +460,8 @@
         ? `<p class="hint">No models with recorded resource warnings match this filter.</p>` : q
         ? `<p class="hint">No models match “${esc(q)}”.</p>`
         : (activeView === "online"
-          ? `<p class="hint">No online models are available. Configure the hosted provider in Settings.</p>`
-          : `<p class="hint">No local models match this view. Get one from the <a href="/downloads">Downloads page</a>.</p>`);
+          ? `<p class="hint">No online models are available. Configure an opencode.ai API key in <a href="/settings">Settings</a> first.</p>`
+          : `<p class="hint">No llama.cpp models are available. Upload a GGUF above or get one from the <a href="/downloads">Downloads page</a>.</p>`);
     }
   }
 
@@ -562,8 +497,8 @@
     }
   });
 
-  // (confirmed live: a working vLLM cold-start took 91s). Real user report: this looked exactly
-  // like a failed load, because the old code showed one static toast that auto-hid after 4s and
+  // A slow cold start looked exactly like a failed load when the old code showed one static
+  // toast that auto-hid after 4s and
   // never touched the card again until the whole request finished — nothing on the page visibly
   // changed for the rest of the wait, so a perfectly successful load looked hung/broken. Now the
   // toast persists and ticks up every second, and the specific card shows a "Loading…" badge with
@@ -587,36 +522,28 @@
     busyLabel = "";
   }
 
-  // "loaded" means the service itself is stopped, so loading one starts it from cold (confirmed
-  // live: vLLM took 91s). LM Studio/Lemonade are always-on processes, so there's no service to
-  // start for them — only the on-demand three ever need this extra warning.
-
   async function loadModel(modelKey) {
     if (busy || window.llamaWebModelTests?.isRunning()) return;
-    const targetModel = models.find((m) => m.id === modelKey);
-    const target = targetModel?.backend;
+    const target = models.find((m) => m.id === modelKey)?.backend;
     const supportTypes = new Set(["embeddings", "embedding", "transcription", "tts"]);
     const other = models.filter(
       (m) => m.state === "loaded" && m.id !== modelKey
         && m.externally_managed !== true
         && !supportTypes.has(m.type)
     );
-    const serviceIsDown = ON_DEMAND_BACKENDS.has(target) && !models.some((m) => m.backend === target && m.state === "loaded");
+    const serviceIsDown = ON_DEMAND_BACKENDS.has(target)
+      && !models.some((m) => m.backend === target && m.state === "loaded");
 
     const lines = [`Load ${modelKey}?`];
     if (other.length) {
       lines.push(`The currently loaded chat model will be unloaded: ${other.map((m) => m.id).join(", ")}.`);
     }
-    if (target === "lemonade") {
-      lines.push("Voice input, voice output, and embedding/RAG support models will be kept loaded.");
-    }
     if (serviceIsDown) {
-      lines.push(`${LABEL[target] || target}'s service is currently stopped, so this will start it from cold — that can take up to ~1-2 minutes.`);
+      lines.push(`${LABEL[target] || target}'s service is stopped, so this will start it from cold — that can take a few minutes for a large GGUF.`);
     }
-    const needsConfirmation = other.length > 0 || target === "lemonade" || serviceIsDown;
-    if (needsConfirmation && !confirm(lines.join("\n\n"))) return;
+    if (lines.length > 1 && !confirm(lines.join("\n\n"))) return;
 
-    const stopTicker = startBusyOp(modelKey, "Loading", `Loading ${modelKey}… (cold starts can take up to ~1-2 min)`);
+    const stopTicker = startBusyOp(modelKey, "Loading", `Loading ${modelKey}… (cold starts can take a few minutes)`);
     try {
       const res = await fetch("/api/models/load", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -624,8 +551,6 @@
           model: modelKey,
           identifier: el("opt-identifier").value.trim() || undefined,
           context_length: el("opt-context").value ? Number(el("opt-context").value) : undefined,
-          ttl: el("opt-ttl").value ? Number(el("opt-ttl").value) : undefined,
-          gpu: el("opt-gpu").value.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -641,13 +566,9 @@
   async function unloadModel(id) {
     if (busy || window.llamaWebModelTests?.isRunning()) return;
     const target = models.find((m) => m.id === id)?.backend;
-    // For the on-demand backends, "unload" isn't just freeing RAM — vllm_client/kobold_client/
-    // reading each one directly), since that's the only way vLLM/KoboldCPP work and how
-    // full cold start again (~1-2 min), not instant — worth surfacing before it happens, same
-    // reasoning as the cold-start warning added to loadModel() above.
     const lines = [`Unload ${id}?`];
     if (ON_DEMAND_BACKENDS.has(target)) {
-      lines.push(`This stops ${LABEL[target] || target}'s service entirely (it only runs while a model is loaded) — loading a model here again will be a cold start, which can take up to ~1-2 minutes.`);
+      lines.push(`This stops ${LABEL[target] || target}'s service entirely. Loading a model here again will be a cold start.`);
     }
     if (!confirm(lines.join("\n\n"))) return;
 
@@ -661,7 +582,7 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "unload failed");
-      toast(`Unloaded ${id}`);
+      toast(`Stopped ${id} — its llama.cpp service is no longer running.`);
     } catch (err) {
       const detail = err.name === "AbortError"
         ? "request timed out; the backend may still be finishing an active request"
@@ -678,8 +599,6 @@
     if (busy || window.llamaWebModelTests?.isRunning()) return;
     const m = models.find((mm) => mm.id === id);
     const lines = [`Permanently delete "${id}" from disk? Frees storage (and memory if loaded), but you'd need to re-download it.`];
-    // Each backend's delete_model() unloads first if this is the one currently being served
-    // on-demand three that means stopping the whole service too, same as a plain Unload does.
     if (m?.state === "loaded" && ON_DEMAND_BACKENDS.has(m.backend)) {
       lines.push(`It's currently loaded, so this also stops ${LABEL[m.backend] || m.backend}'s service first.`);
     }

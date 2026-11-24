@@ -16,15 +16,17 @@ from werkzeug.serving import make_server
 
 with contextlib.ExitStack() as stack:
     catalog = model_metadata_store.resource_warnings()
-    models = [{'backend': backend, 'id': item['model'], 'state': 'not-loaded', 'type': 'llm'}
-              for (backend, _), item in catalog.items()]
-    models.append({'backend': 'lmstudio', 'id': 'qwen/qwen3.5-4b', 'state': 'not-loaded', 'type': 'llm'})
-    for backend, client in {'lmstudio': app.lms, 'lemonade': app.lemonade, 'vllm': app.vllm,
-                            'kobold': app.kobold, 'fastflowlm': app.fastflowlm}.items():
-        stack.enter_context(patch.object(client, 'list_models', side_effect=lambda key=backend:
-                                        [dict(m) for m in models if m['backend'] == key]))
-        stack.enter_context(patch.object(client, 'base_url', return_value='http://127.0.0.1:9999'))
-    stack.enter_context(patch.object(app.q38rocm, 'list_models', return_value=[]))
+    # The Models page now lists only the local llama.cpp engine, so attribute all
+    # reviewed warnings to that backend for this layout/filter check.
+    warnings = {}
+    models = []
+    for (_, model), item in catalog.items():
+        warnings[('llamacpp', model.casefold())] = item
+        models.append({'backend': 'llamacpp', 'id': model, 'state': 'not-loaded', 'type': 'llm'})
+    stack.enter_context(patch.object(model_metadata_store, 'resource_warnings', return_value=warnings))
+    models.append({'backend': 'llamacpp', 'id': 'llamacpp/qwen3.5-4b', 'state': 'not-loaded', 'type': 'llm'})
+    stack.enter_context(patch.object(app.llamacpp, 'list_models', side_effect=lambda: [dict(m) for m in models]))
+    stack.enter_context(patch.object(app.llamacpp, 'base_url', return_value='http://127.0.0.1:9999'))
     stack.enter_context(patch.object(app._model_test_registry, 'list', return_value=[]))
     stack.enter_context(patch.object(app.users_store, 'get_user_by_id', return_value={'id': 'ui-test', 'username': 'ui-test', 'role': 'admin'}))
     stack.enter_context(patch.dict(app.app.config, {'SESSION_COOKIE_SECURE': False}))
@@ -43,7 +45,7 @@ with contextlib.ExitStack() as stack:
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(f'http://127.0.0.1:{server.server_port}/models')
         expect(page.locator('.model-resource-warning')).to_have_count(10)
-        expect(page.locator('.model-card2')).to_have_count(12)
+        expect(page.locator('.model-card2')).to_have_count(11)
         # The summary text is now always visible in the actions row next to the Load
         # button (.model-load-warning); only the evidence list stays collapsed.
         expect(page.locator('.model-load-warning')).to_have_count(10)

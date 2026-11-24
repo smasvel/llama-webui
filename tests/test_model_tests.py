@@ -317,9 +317,9 @@ class ProfileTests(unittest.TestCase):
 
     def test_q38rocm_catalog_uses_real_hugging_face_repository_id(self):
         from llama_web.backends import q38rocm_client
-        result = q38rocm_client.search_catalog('julianmb')
+        result = q38rocm_client.search_catalog('cdiamond')
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['id'], 'julianmb/Qwen-3.8-27B-ROCmFP4-FAST-GGUF')
+        self.assertEqual(result[0]['id'], 'cdiamond/Qwen3.8-27B-iMatrix-NVFP4-MTP-GGUF')
         self.assertEqual(result[0]['repo_id'], result[0]['id'])
 
     def test_q38rocm_tests_disable_thinking_and_preserve_declared_budgets(self):
@@ -525,7 +525,7 @@ class ModelHandoffTests(unittest.TestCase):
             stack.enter_context(patch.object(app.fastflowlm, '_PAUSED_FILE', root / 'paused'))
             stack.enter_context(patch.object(app.fastflowlm, '_systemctl'))
             stack.enter_context(patch.object(app.fastflowlm, '_write_active'))
-            for client in (app.lms, app.lemonade, app.vllm, app.kobold, app.q38rocm):
+            for client in (app.llamacpp, app.lms, app.lemonade, app.vllm, app.kobold, app.q38rocm):
                 stack.enter_context(patch.object(client, 'list_models', return_value=[]))
             stack.enter_context(patch.object(app.fastflowlm, 'list_models', return_value=[
                 {'id':'flm/previous','state':'loaded','type':'llm'}]))
@@ -541,7 +541,7 @@ class ModelHandoffTests(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             directory = stack.enter_context(tempfile.TemporaryDirectory())
             stack.enter_context(patch.object(app.fastflowlm, '_PAUSED_FILE', Path(directory) / 'paused'))
-            for client in (app.lms, app.lemonade, app.vllm, app.kobold, app.q38rocm):
+            for client in (app.llamacpp, app.lms, app.lemonade, app.vllm, app.kobold, app.q38rocm):
                 stack.enter_context(patch.object(client, 'list_models', return_value=[]))
             stack.enter_context(patch.object(app.fastflowlm, 'list_models', return_value=[
                 {'id':'flm/previous','state':'loaded','type':'llm'}]))
@@ -703,7 +703,8 @@ class ModelHandoffVerificationTests(unittest.TestCase):
         target = {'id': 'target', 'state': 'not-loaded', 'type': 'llm', 'size_gb': 1.0}
         resident = {'id': 'resident', 'state': 'loaded', 'type': 'llm', 'size_gb': 1.0}
         unload_resident = Mock()
-        with patch.object(app.lms, 'list_models', return_value=[target]), \
+        with patch.object(app.llamacpp, 'list_models', return_value=[]), \
+             patch.object(app.lms, 'list_models', return_value=[target]), \
              patch.object(app.lemonade, 'list_models', return_value=[]), \
              patch.object(app.vllm, 'list_models', return_value=[]), \
              patch.object(app.kobold, 'list_models', return_value=[resident]), \
@@ -718,7 +719,8 @@ class ModelHandoffVerificationTests(unittest.TestCase):
     def test_handoff_verification_uses_live_backend_inventories(self):
         live = {'id': 'target', 'state': 'loaded', 'type': 'llm'}
         stopped = {'id': 'stale', 'state': 'not-loaded', 'type': 'llm'}
-        with patch.object(app.lms, 'list_models', return_value=[live]), \
+        with patch.object(app.llamacpp, 'list_models', return_value=[]), \
+             patch.object(app.lms, 'list_models', return_value=[live]), \
              patch.object(app.lemonade, 'list_models', return_value=[stopped]), \
              patch.object(app.vllm, 'list_models', return_value=[]), \
              patch.object(app.kobold, 'list_models', return_value=[]), \

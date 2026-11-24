@@ -26,6 +26,7 @@ import requests
 from llama_web.integrations import public_model_catalog
 from dotenv import dotenv_values, load_dotenv, unset_key
 from flask import Flask, Response, copy_current_request_context, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, stream_with_context, url_for
+from model_downloads import downloads as model_downloads_bp
 from werkzeug.utils import secure_filename
 
 load_dotenv()
@@ -52,6 +53,7 @@ from llama_web.backends import flm_conversion
 from llama_web.backends import media_intent
 from llama_web.backends import video_generation
 from llama_web.backends import lemonade_client as lemonade
+from llama_web.backends import llamacpp_client as llamacpp
 from llama_web.backends import lmstudio_client as lms
 from llama_web.backends import vllm_client as vllm
 from llama_web.backends import opencode_client as zen
@@ -167,6 +169,10 @@ app.config.update(
     MAX_FORM_MEMORY_SIZE=60 * 1024 * 1024,
     MAX_CONTENT_LENGTH=80 * 1024 * 1024,
 )
+# Catalog downloads write directly into the llama-web model library, which the
+# Models page reads. Keeping the blueprint registered here means downloads started
+# from this app show up in the same inventory as uploads.
+app.register_blueprint(model_downloads_bp)
 
 _SESSION_IDLE_SECONDS = 30 * 60
 # Built-in defaults for the chat request limits. An admin can override these from the
@@ -317,6 +323,13 @@ def _login_csrf_token() -> str:
         token = secrets.token_urlsafe(32)
         session["login_csrf_token"] = token
     return token
+
+
+@app.before_request
+def _expose_current_user():
+    # The GGUF download blueprint authorizes against g.user; the rest of this app
+    # reads the session directly. Keep both views consistent on every request.
+    g.user = users_store.get_user_by_id(session.get("user_id", "")) if session.get("logged_in") else None
 
 
 @app.before_request
@@ -1805,6 +1818,7 @@ def api_service_status():
 
 
 @app.post("/api/admin/restart-llama_web")
+@app.post("/api/admin/restart-llama-web")
 @admin_required
 def api_restart_llama_web():
     import uuid
@@ -1817,6 +1831,19 @@ def api_restart_llama_web():
     subprocess.Popen(["systemctl", "--user", "restart", "ai-webui.service"],
                      start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return jsonify({"ok": True, "message": "llama_web restart requested. This page will disconnect briefly.", "job_id": job_id}), 202
+
+
+@app.post("/api/admin/restart-engine")
+@admin_required
+def api_restart_engine():
+    """Restart the local llama.cpp engine. The configured model reloads on start."""
+    try:
+        llamacpp.restart_service()
+        model_metadata_store.record_service_status("llama_web_engine", "started", detail="Restarted by admin")
+        return jsonify({"ok": True, "message": "llama.cpp engine restarted with the configured model."})
+    except Exception as exc:
+        model_metadata_store.record_service_status("llama_web_engine", "error", detail=str(exc)[:300])
+        return jsonify({"ok": False, "message": str(exc)[:300]}), 502
 
 
 @app.get("/downloads")
@@ -2011,8 +2038,8 @@ def quizzes_page():
 @app.get("/models")
 @admin_required
 def models_page():
-    """Full-page model manager (replaces the old header popup) — load/unload/delete models
-    on disk across all backends. Admin-only, same as the model-management endpoints."""
+    """Full-page model manager for the llama.cpp engine library and hosted models.
+    Admin-only, same as the model-management endpoints."""
     return render_template("models.html", username=session.get("username"))
 
 
@@ -2267,7 +2294,9 @@ def _collect_completion(messages: list[dict], model: str, temperature: float = 0
                         max_tokens: int | None = 2048, session_id: str | None = None) -> str:
     """Run a non-streaming chat completion by draining the selected backend's SSE stream
     and concatenating the content deltas. Backend is chosen the same way /api/chat does."""
-    if lemonade.owns_model(model):
+    if llamacpp.owns_model(model):
+        backend = llamacpp
+    elif lemonade.owns_model(model):
         backend = lemonade
     elif vllm.owns_model(model):
         backend = vllm
@@ -2275,8 +2304,6 @@ def _collect_completion(messages: list[dict], model: str, temperature: float = 0
         backend = zen
     elif kobold.owns_model(model):
         backend = kobold
-    elif q38rocm.owns_model(model):
-        backend = q38rocm
     elif fastflowlm.owns_model(model):
         backend = fastflowlm
     else:
@@ -2388,68 +2415,27 @@ def api_system_stats():
 @app.get("/api/models")
 @login_required
 def api_list_models():
-    # LM Studio — same fail-soft contract as the other backends below; it being
-    # down should never block the rest of the models list from loading.
+    # llama-web serves models through its local llama.cpp engine. The engine lists
+    # GGUFs from the llama-web model library; a stopped service simply contributes
+    # no models to this page.
     try:
-        models = list(lms.list_models())
-    except lms.LMStudioError:
+        models = list(llamacpp.list_models())
+    except Exception:
         models = []
     for m in models:
-        m["backend"] = "lmstudio"
-        m["enable_thinking"] = _lmstudio_model_thinking_overrides().get(m.get("id"), True)
-    # Lemonade is not used by llama-web; only the llama.cpp engine is supported.
-    # Best-effort, same as Lemonade above: runs locally via vllm.service (see
-    # vllm_client's docstring), but the same fail-soft contract applies regardless —
-    # that service being down for any reason should never break this whole endpoint.
-    try:
-        vllm_models = vllm.list_models()
-    except vllm.VLLMError:
-        vllm_models = []
-    for m in vllm_models:
-        m["backend"] = "vllm"
-    models += vllm_models
-    # already served there; an offline/unconfigured endpoint is an empty group.
-    # opencode.ai — remote hosted gateway; no key configured is an empty group.
+        m["backend"] = "llamacpp"
+        # This engine runs with --no-reasoning; Qwen-style reasoning templates drift
+        # into garbled text here, so thinking is opt-in rather than the default.
+        m["enable_thinking"] = _llamacpp_model_thinking_overrides().get(m.get("id"), False)
+    # opencode.ai — remote hosted models, shown on the separate Online tab. An
+    # unconfigured API key is normal and simply yields an empty online group.
     try:
         zen_models = zen.list_models()
-    except zen.OpenCodeError:
+    except Exception:
         zen_models = []
     for m in zen_models:
         m["backend"] = "opencode"
     models += zen_models
-    # KoboldCPP — same fail-soft contract; a stopped kobold.service just omits its models.
-    try:
-        kobold_models = kobold.list_models()
-    except Exception:
-        kobold_models = []
-    for m in kobold_models:
-        m["backend"] = "kobold"
-        # Same thinking toggle the Models page shows for Lemonade/LM Studio/q38rocm;
-        # global default from Settings, per-model choice overrides it.
-        m["enable_thinking"] = _kobold_model_thinking_overrides().get(
-            m.get("id"), (settings_store.get("kobold_enable_thinking") or "true") == "true")
-    models += kobold_models
-    # FastFlowLM (standalone NPU) — same fail-soft contract.
-    try:
-        flm_models = fastflowlm.list_models()
-    except Exception:
-        flm_models = []
-    for m in flm_models:
-        m["backend"] = "fastflowlm"
-    models += flm_models
-    # q38rocm is a locally managed, single-model Vulkan/ROCmFPX server.
-    try:
-        q38_models = q38rocm.list_models()
-    except q38rocm.Q38RocmError:
-        q38_models = []
-    for m in q38_models:
-        m["backend"] = "q38rocm"
-        m["enable_thinking"] = _q38rocm_model_thinking_overrides().get(m.get("id"), False)
-    models += q38_models
-    # Wan's sd.cpp CLI loads weights per generation rather than remaining resident
-    # behind a Lemonade model slot. Expose it in inventory with its cache/readiness
-    # status without reporting it as a chat model or falsely claiming it is loaded.
-    models.append(video_generation.model_inventory_entry())
     # Per-model context the admin saved from the Models page. Backends only report what is
     # currently loaded (or their own default), so without this an unloaded model would lose
     # the chosen window on the next load. Also what the Models page edits and what the
@@ -2497,16 +2483,13 @@ def api_list_models():
         # broken responses (embedding/transcription/TTS models don't serve chat
         # completions at all). Admins still see them (Models panel needs to for
         # load/unload); regular users never do. Filtered server-side, not just hidden
-        # client-side. By type rather than a hardcoded id so this covers whichever
-        # backend is actually running each one (LM Studio's or Lemonade's) without
-        # needing to know its exact id.
+        # client-side, and by type so whichever llama.cpp service runs a support model
+        # is covered without hardcoding its id.
         models = [
             m for m in models
             if m.get("type") not in ("embeddings", "transcription", "tts", "image", "video")
         ]
-    clients = {'lmstudio': lms, 'lemonade': lemonade, 'fastflowlm': fastflowlm,
-               'q38rocm': q38rocm,
-               'vllm': vllm, 'kobold': kobold}
+    clients = {'llamacpp': llamacpp}
     local_backends = {name for name, client in clients.items()
                       if urlsplit(client.base_url()).hostname in ('localhost', '127.0.0.1', '::1')}
     annotated = model_resource_warnings.annotate(models, local_backends)
@@ -2550,8 +2533,8 @@ def _lmstudio_model_thinking_overrides() -> dict[str, bool]:
     return lmstudio_thinking.overrides()
 
 
-def _q38rocm_model_thinking_overrides() -> dict[str, bool]:
-    raw = settings_store.get("q38rocm_model_thinking_overrides") or "{}"
+def _llamacpp_model_thinking_overrides() -> dict[str, bool]:
+    raw = settings_store.get("llamacpp_model_thinking_overrides") or "{}"
     try:
         data = json.loads(raw)
     except (TypeError, ValueError):
@@ -2562,11 +2545,8 @@ def _q38rocm_model_thinking_overrides() -> dict[str, bool]:
             if isinstance(model_id, str) and isinstance(value, bool)}
 
 
-def _kobold_model_thinking_overrides() -> dict[str, bool]:
-    """Per-model thinking choices for KoboldCPP GGUFs — same mechanism as the
-    Lemonade/LM Studio/q38rocm overrides, so Qwen3-style thinking models served
-    by KoboldCPP get the same request-level enable_thinking control."""
-    raw = settings_store.get("kobold_model_thinking_overrides") or "{}"
+def _q38rocm_model_thinking_overrides() -> dict[str, bool]:
+    raw = settings_store.get("q38rocm_model_thinking_overrides") or "{}"
     try:
         data = json.loads(raw)
     except (TypeError, ValueError):
@@ -2586,13 +2566,10 @@ def api_set_model_thinking():
         return jsonify({"error": "model is required"}), 400
     if not isinstance(body.get("enabled"), bool):
         return jsonify({"error": "enabled must be a boolean"}), 400
-    backend = body.get("backend", "lemonade")
-    if backend not in ("lemonade", "lmstudio", "q38rocm", "kobold"):
+    backend = body.get("backend", "llamacpp")
+    if backend != "llamacpp":
         return jsonify({"error": "unsupported backend"}), 400
-    overrides = (_lmstudio_model_thinking_overrides() if backend == "lmstudio"
-                 else _q38rocm_model_thinking_overrides() if backend == "q38rocm"
-                 else _kobold_model_thinking_overrides() if backend == "kobold"
-                 else _lemonade_model_thinking_overrides())
+    overrides = _llamacpp_model_thinking_overrides()
     overrides[model_id] = body["enabled"]
     settings_store.set(backend + "_model_thinking_overrides", json.dumps(overrides, separators=(",", ":")))
     return jsonify({"model": model_id, "enable_thinking": body["enabled"]})
@@ -2622,8 +2599,8 @@ def api_set_model_context():
     model_id = str(body.get("model") or "").strip()
     if not model_id or len(model_id) > 512:
         return jsonify({"error": "model is required"}), 400
-    backend = body.get("backend", "lemonade")
-    clients = {"lemonade": lemonade, "lmstudio": lms, "vllm": vllm, "kobold": kobold, "q38rocm": q38rocm, "fastflowlm": fastflowlm}
+    backend = body.get("backend", "llamacpp")
+    clients = {"llamacpp": llamacpp}
     if backend not in clients:
         return jsonify({"error": f"{backend} does not support changing its served context from llama_web."}), 400
     try:
@@ -2639,10 +2616,21 @@ def api_set_model_context():
     if entry is None:
         return jsonify({"error": f"{model_id} is not available from {backend}."}), 404
     maximum = entry.get("max_context_length")
+    if backend == "llamacpp":
+        # The model's trained context is much larger than this Vulkan runtime can
+        # actually serve with FP16 KV; cap the saved window to a loadable one.
+        safe = llamacpp.safe_context_limit(model_id)
+        maximum = min(maximum, safe) if isinstance(maximum, int) and not isinstance(maximum, bool) and maximum > 0 else safe
     if 'k2-horizon' in str(model_id).lower() and (not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 32768):
         maximum = 32768
     if (isinstance(maximum, int) and not isinstance(maximum, bool) and maximum > 0
             and value > maximum):
+        if backend == "llamacpp":
+            native = entry.get("max_context_length")
+            native_note = f" (the model itself supports {native:,})" if isinstance(native, int) and native > maximum else ""
+            return jsonify({"error":
+                            f"This llama.cpp runtime can serve at most {maximum:,} context tokens"
+                            f"{native_note}; a larger window crashes the Vulkan engine."}), 400
         return jsonify({"error":
                         f"{model_id} supports at most {maximum:,} context tokens."}), 400
     try:
@@ -2674,7 +2662,7 @@ def api_set_max_model_contexts():
     models (that would interrupt work), but every later Load uses the saved maximum. Models
     whose backend does not report a maximum, or that are not chat models, are left alone.
     """
-    clients = {"lemonade": lemonade, "lmstudio": lms, "vllm": vllm, "kobold": kobold, "q38rocm": q38rocm, "fastflowlm": fastflowlm}
+    clients = {"llamacpp": llamacpp}
     updated, skipped, failures = [], [], []
     for backend, client in clients.items():
         try:
@@ -2691,6 +2679,9 @@ def api_set_max_model_contexts():
                 maximum = int(maximum)
             if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 512:
                 maximum = model.get("configured_context_length")
+            if backend == "llamacpp":
+                safe = llamacpp.safe_context_limit(model_id)
+                maximum = min(maximum, safe) if isinstance(maximum, int) and not isinstance(maximum, bool) and maximum > 0 else safe
             if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 512:
                 skipped.append({"backend": backend, "model": model_id,
                                 "reason": "maximum context was not reported"})
@@ -2782,8 +2773,8 @@ def _test_loaded_reasoning_models():
     Model handoff certification must use live backend inventories so stale UI
     metadata cannot fail an otherwise successful handoff.
     """
-    clients = (("lmstudio", lms), ("lemonade", lemonade), ("vllm", vllm),
-               ("kobold", kobold), ("q38rocm", q38rocm), ("fastflowlm", fastflowlm))
+    clients = (("llamacpp", llamacpp), ("lmstudio", lms), ("lemonade", lemonade),
+               ("vllm", vllm), ("kobold", kobold), ("fastflowlm", fastflowlm))
     loaded = []
     for backend, client in clients:
         for model in client.list_models():
@@ -2820,19 +2811,18 @@ def _normalize_question_tool_calls(tool_calls, offered_tools, messages):
 
 def _test_connection(target):
     backend = target['backend']
-    client = {'fastflowlm': fastflowlm, 'lmstudio': lms, 'lemonade': lemonade,
-              'vllm': vllm, 'kobold': kobold, 'opencode': zen,
-              'q38rocm': q38rocm}[backend]
+    client = {'llamacpp': llamacpp, 'fastflowlm': fastflowlm, 'lmstudio': lms,
+              'lemonade': lemonade, 'vllm': vllm, 'kobold': kobold, 'opencode': zen}[backend]
     base = client.base_url().rstrip('/')
     local = urlsplit(base)
     proxy_ports = {'fastflowlm': (52625, 52626), 'lmstudio': (1234, 13307), 'lemonade': (13305, 13306)}
     if backend in proxy_ports and local.hostname in ('127.0.0.1', 'localhost', '::1') and local.port == proxy_ports[backend][0]:
         base = 'http://127.0.0.1:' + str(proxy_ports[backend][1])
     model = target['id']
-    if backend == 'fastflowlm':
+    if backend == 'llamacpp':
+        model = llamacpp.request_model_id()
+    elif backend == 'fastflowlm':
         model = fastflowlm.resolve_model(model)
-    elif backend == 'q38rocm':
-        model = q38rocm.request_model_id()
     elif backend == 'kobold':
         # Exercise llama_web's Kobold tool-compatibility bridge during live model
         # checks so the report reflects the endpoint llama_web chat actually uses.
@@ -2859,7 +2849,7 @@ def _test_context(target):
     if target['backend'] == 'fastflowlm':
         return flm_context.context_limit(target['id'])
     client = {'lmstudio': lms, 'lemonade': lemonade, 'vllm': vllm,
-              'kobold': kobold, 'opencode': zen, 'q38rocm': q38rocm}[target['backend']]
+              'kobold': kobold, 'opencode': zen}[target['backend']]
     for model in client.list_models():
         if model.get('id') == target['id']:
             window = model.get('loaded_context_length')
@@ -2890,7 +2880,7 @@ def _prepare_agent_model(job):
         # target. For an agent continuing with a healthy model, that eviction is
         # unnecessary and can strand the task if a backend's unload call stalls.
         client = {'lemonade': lemonade, 'lmstudio': lms, 'vllm': vllm,
-                  'kobold': kobold, 'q38rocm': q38rocm}.get(model['providerID'])
+                  'kobold': kobold}.get(model['providerID'])
         if client:
             try:
                 loaded = next((entry for entry in client.list_models()
@@ -4262,11 +4252,11 @@ def _unload_reasoning_models_before_load(requested: str, *, npu_lock_held: bool 
     guaranteed.
     """
     backends = (
+        ("llama.cpp", llamacpp.list_models, llamacpp.unload_model),
         ("LM Studio", lms.list_models, lms.unload_model),
         ("Lemonade", lemonade.list_models, lemonade.unload_model),
         ("vLLM", vllm.list_models, vllm.unload_model),
         ("KoboldCPP", kobold.list_models, kobold.unload_model),
-        ("q38rocm", q38rocm.list_models, q38rocm.unload_model),
         ("FastFlowLM", fastflowlm.list_models, fastflowlm.unload_model),
     )
     inventories = []
@@ -4295,13 +4285,13 @@ def _unload_reasoning_models_before_load(requested: str, *, npu_lock_held: bool 
     if size_gb is None:
         for label, _, _ in inventories:
             try:
-                if label == "LM Studio":
+                if label == "llama.cpp":
+                    size_gb = next((m.get("size_gb") for m in llamacpp.list_models()
+                                    if m.get("id") == requested), None)
+                elif label == "LM Studio":
                     size_gb = lms.model_size_gb(requested)
                 elif label == "Lemonade":
                     size_gb = lemonade.model_size_gb(requested)
-                elif label == "q38rocm":
-                    size_gb = next((m.get("size_gb") for m in q38rocm.list_models()
-                                    if m.get("id") == requested), None)
             except Exception:
                 size_gb = None
             if size_gb is not None:
@@ -4339,14 +4329,14 @@ def _unload_reasoning_models_before_load(requested: str, *, npu_lock_held: bool 
 def _model_load_size_gb(requested: str) -> float | None:
     """Best-effort estimate of installed model weights for post-eviction capacity checks."""
     try:
-        if fastflowlm.owns_model(requested):
+        if llamacpp.owns_model(requested):
+            models = llamacpp.list_models()
+        elif fastflowlm.owns_model(requested):
             models = fastflowlm.list_models()
         elif vllm.owns_model(requested):
             models = vllm.list_models()
         elif kobold.owns_model(requested):
             models = kobold.list_models()
-        elif q38rocm.owns_model(requested):
-            models = q38rocm.list_models()
         elif lemonade.owns_model(requested):
             return lemonade.model_size_gb(requested)
         else:
@@ -4414,7 +4404,7 @@ def _track_model_load_status(view):
         if not isinstance(model_id, str) or not model_id:
             return view(*args, **kwargs)
         backend = next((name for name, client in (
-            ("opencode", zen), ("fastflowlm", fastflowlm), ("q38rocm", q38rocm), ("vllm", vllm),
+            ("opencode", zen), ("fastflowlm", fastflowlm), ("vllm", vllm),
             ("kobold", kobold), ("lemonade", lemonade),
         ) if client.owns_model(model_id)), None)
         if backend is None:
@@ -4446,7 +4436,7 @@ def _track_model_load_status(view):
                         print(f"[models] Could not record load event for {model_id}: {exc}", flush=True)
                     # Update service status to reflect that the backend is running
                     _svc_name = {"lemonade": "Lemonade", "lmstudio": "LM Studio", "vllm": "vLLM",
-                                 "kobold": "KoboldCPP", "q38rocm": "q38rocm", "fastflowlm": "FastFlowLM"}.get(backend, backend)
+                                 "kobold": "KoboldCPP", "fastflowlm": "FastFlowLM"}.get(backend, backend)
                     try:
                         model_metadata_store.record_service_status(_svc_name, "started", detail=f"Model {model_id} loaded")
                     except Exception:
@@ -4495,14 +4485,17 @@ def api_load_model():
         except zen.OpenCodeError as exc:
             return jsonify({"error": str(exc)}), 502
         return jsonify({"ok": True, "unloaded": [], "externally_managed": True})
-    if q38rocm.owns_model(model_key):
+    if llamacpp.owns_model(model_key):
+        # The engine has no runtime load API: llama-web rewrites LLAMA_MODEL in
+        # server.conf and restarts llama-web-engine.service, so keep the shared
+        # eviction and memory checks around that handoff.
         try:
             unloaded = _unload_reasoning_models_before_load(model_key)
             refusal = resource_guard.check_available_memory(_model_load_size_gb(model_key))
             if refusal:
                 return jsonify({"error": refusal}), 422
-            q38rocm.load_model(model_key)
-        except (q38rocm.Q38RocmError, RuntimeError) as exc:
+            llamacpp.load_model(model_key, context_length=body.get("context_length"))
+        except (llamacpp.LlamaCppError, RuntimeError) as exc:
             return jsonify({"error": str(exc)}), 502
         return jsonify({"ok": True, "unloaded": unloaded})
     if fastflowlm.owns_model(model_key):
@@ -4708,10 +4701,10 @@ def api_unload_model():
         return jsonify({"error": "'identifier' is required"}), 400
     if zen.owns_model(identifier):
         return jsonify({"error": "opencode.ai models are hosted remotely and cannot be unloaded from llama_web."}), 409
-    if q38rocm.owns_model(identifier):
+    if llamacpp.owns_model(identifier):
         try:
-            q38rocm.unload_model(identifier)
-        except q38rocm.Q38RocmError as exc:
+            llamacpp.unload_model(identifier)
+        except llamacpp.LlamaCppError as exc:
             return jsonify({"error": str(exc)}), 502
         return jsonify({"ok": True})
     if vllm.owns_model(identifier):
@@ -4753,8 +4746,8 @@ def api_delete_model():
     if not identifier:
         return jsonify({"error": "'identifier' is required"}), 400
     backend = next((name for name, client in (
-        ('opencode', zen), ('vllm', vllm), ('kobold', kobold),
-        ('fastflowlm', fastflowlm), ('lemonade', lemonade), ('q38rocm', q38rocm),
+        ('llamacpp', llamacpp), ('opencode', zen), ('vllm', vllm), ('kobold', kobold),
+        ('fastflowlm', fastflowlm), ('lemonade', lemonade),
     ) if client.owns_model(identifier)), 'lmstudio')
     if not getattr(_model_test_context, 'active', False):
         if any(
@@ -4772,10 +4765,14 @@ def api_delete_model():
         ):
             return jsonify({'error': 'This model is part of an active model test run. Cancel or wait for that run before deleting it.'}), 409
 
+    if backend == 'llamacpp':
+        try:
+            llamacpp.delete_model(identifier)
+        except llamacpp.LlamaCppError as exc:
+            return jsonify({"error": str(exc)}), 502
+        return jsonify({"ok": True})
     if backend == 'opencode':
         return jsonify({"error": "opencode.ai models cannot be deleted from llama_web; they are managed by the opencode.ai account."}), 409
-    if backend == 'q38rocm':
-        return jsonify({"error": "The q38rocm model file is managed in data/q38rocm/models and cannot be deleted from llama_web."}), 409
     if backend == 'vllm':
         # vllm.delete_model() unloads first itself if this is the currently-served
         # model — no separate best-effort unload needed here, unlike the Lemonade
@@ -4865,7 +4862,7 @@ _MODEL_BACKEND_INFO = {
     "vllm": ("vLLM", "Hugging Face weights", "CPU on this system"),
     "kobold": ("KoboldCPP", "GGUF", "CPU / Vulkan GPU"),
     "fastflowlm": ("FastFlowLM", "FLM NPU", "AMD Ryzen AI NPU"),
-    "q38rocm": ("q38rocm (local RADV Vulkan)", "GGUF (Q3_K_M)", "AMD Radeon Vulkan GPU"),
+    "q38rocm": ("q38rocm (local RADV Vulkan)", "GGUF (iMatrix NVFP4 MTP)", "AMD Radeon Vulkan GPU"),
 }
 
 
@@ -5079,11 +5076,12 @@ def api_download_catalog_model():
 @app.post("/api/models/upload-local")
 @admin_required
 def api_upload_local_model():
-    """Save and register a local GGUF for the configured Lemonade server."""
+    """Store an uploaded GGUF in the llama-web library so the llama.cpp engine can load it."""
     # This endpoint intentionally accepts large model files; keep the global form
     # memory cap for the other multipart endpoints, but allow the upload parser to
     # stream this one into its temporary file rather than rejecting at 60 MB.
     request.max_form_memory_size = 100 * 1024**3
+    request.max_content_length = 100 * 1024**3
     uploaded = request.files.get("model_file")
     if not uploaded or not uploaded.filename:
         return jsonify({"error": "Choose a GGUF model file to upload."}), 400
@@ -5096,9 +5094,12 @@ def api_upload_local_model():
     if request.content_length and request.content_length > 100 * 1024**3:
         return jsonify({"error": "Model uploads are limited to 100 GB."}), 413
 
-    models_dir = Path(os.environ.get("LLAMA_WEB_LOCAL_MODELS_DIR", database.DATA_DIR / "local-models"))
-    models_dir.mkdir(parents=True, exist_ok=True)
-    target = models_dir / f"{uuid.uuid4().hex}-{filename}"
+    folder = llamacpp.model_library() / stem
+    folder.mkdir(parents=True, exist_ok=True)
+    name = filename
+    while (folder / name).exists():
+        name = f"{Path(filename).stem}-{uuid.uuid4().hex[:6]}{Path(filename).suffix}"
+    target = folder / name
     try:
         uploaded.save(target)
         if target.stat().st_size < 4:
@@ -5106,23 +5107,18 @@ def api_upload_local_model():
         with target.open("rb") as model_file:
             if model_file.read(4) != b"GGUF":
                 raise ValueError("The selected file does not have a valid GGUF header.")
-        result = lemonade.register_local_gguf(stem, str(target.resolve()))
         return jsonify({
             "ok": True,
-            "model_id": result.get("model_name") or f"user.{stem}",
-            "filename": filename,
+            "model_id": llamacpp.model_id(target),
+            "filename": name,
             "size_bytes": target.stat().st_size,
         })
     except ValueError as exc:
         target.unlink(missing_ok=True)
         return jsonify({"error": str(exc)}), 400
-    except lemonade.LemonadeError as exc:
-        target.unlink(missing_ok=True)
-        return jsonify({"error": str(exc)}), 502
     except OSError as exc:
         target.unlink(missing_ok=True)
         return jsonify({"error": f"Could not store the uploaded model: {exc}"}), 500
-
 
 @app.get("/api/models/downloads/active")
 @admin_required
@@ -5439,6 +5435,27 @@ def _test_ondemand_openai(base_url: str, api_key: str | None, label: str, load_h
     return True, f"Connected — serving: {', '.join(ids)}." if ids else "Connected — up, no model loaded yet."
 
 
+def _test_llamacpp() -> tuple[bool, str]:
+    served = llamacpp.served_model()
+    if not served:
+        return False, "llama.cpp engine is not serving a model. Load one from the Models page."
+    context = (served.get("meta") or {}).get("n_ctx")
+    detail = f" with {context:,} token context" if isinstance(context, int) and context > 0 else ""
+    return True, f"Connected — serving {served.get('id')}{detail}."
+
+
+def _test_llama_gateway(host: str, port: int, scheme: str = "http") -> tuple[bool, str]:
+    """Check that llama-web is reachable through Caddy or the Tailscale address."""
+    url = f"{scheme}://{host}:{port}/login"
+    try:
+        response = requests.get(url, verify=False, timeout=8)
+    except requests.RequestException as exc:
+        return False, str(exc)
+    if response.status_code == 200:
+        return True, f"Connected — llama-web reachable at {url}."
+    return False, f"{url} returned HTTP {response.status_code}."
+
+
 def _test_vllm(base_url: str, api_key: str | None) -> tuple[bool, str]:
     return _test_ondemand_openai(
         base_url, api_key, "vLLM",
@@ -5523,7 +5540,17 @@ def _effective_tailscale_ip() -> str | None:
 def api_test_settings():
     body = request.get_json(force=True, silent=True) or {}
     target = body.get("target")
-    if target == "lmstudio":
+    if target == "llamacpp":
+        ok, message = _test_llamacpp()
+    elif target == "caddy_llamacpp":
+        ok, message = _test_llama_gateway("127.0.0.1", 18471)
+    elif target == "tailscale_llamacpp":
+        ts_ip = _effective_tailscale_ip()
+        if not ts_ip:
+            return jsonify({"ok": False,
+                            "message": "No Tailscale IP detected; set a manual override first."})
+        ok, message = _test_llama_gateway(ts_ip, 18474, "https")
+    elif target == "lmstudio":
         ok, message = _test_lmstudio(
             (body.get("base_url") or "").strip() or lms.base_url(),
             body.get("api_key") or lms.api_key(),
@@ -5596,8 +5623,7 @@ def api_test_settings():
         ok, message = _test_caddy(port, caddy["bearer_token"], path, host=ts_ip)
     else:
         return jsonify({
-        "error": "'target' must be lmstudio, lemonade, vllm, opencode, kobold, q38rocm, fastflowlm, "
-                     "or a caddy_*/tailscale_* variant",
+        "error": "'target' must be llamacpp, opencode, caddy_llamacpp, tailscale_llamacpp, or another supported test",
         }), 400
     return jsonify({"ok": ok, "message": message})
 
@@ -6816,10 +6842,10 @@ def api_chat():
                 message["content"] = [{"type": "text", "text": context_note}] + content
             break
 
-    if lemonade.owns_model(model):
+    if llamacpp.owns_model(model):
+        backend, backend_error, backend_name = llamacpp, llamacpp.LlamaCppError, "llamacpp"
+    elif lemonade.owns_model(model):
         backend, backend_error, backend_name = lemonade, lemonade.LemonadeError, "lemonade"
-    elif q38rocm.owns_model(model):
-        backend, backend_error, backend_name = q38rocm, q38rocm.Q38RocmError, "q38rocm"
     elif vllm.owns_model(model):
         backend, backend_error, backend_name = vllm, vllm.VLLMError, "vllm"
     elif zen.owns_model(model):
@@ -6937,8 +6963,8 @@ def api_chat():
                 elif backend is lms and _lmstudio_model_thinking_overrides().get(model) is False:
                     extra_kwargs["enable_thinking"] = False
                     extra_kwargs["chat_template_kwargs"] = {"enable_thinking": False}
-                elif backend is q38rocm:
-                    thinking = _q38rocm_model_thinking_overrides().get(model, False)
+                elif backend is llamacpp:
+                    thinking = _llamacpp_model_thinking_overrides().get(model, False)
                     extra_kwargs["enable_thinking"] = thinking
                     extra_kwargs["chat_template_kwargs"] = {"enable_thinking": thinking}
                 if tools_list:
@@ -7396,7 +7422,6 @@ def _restore_default_model() -> None:
         "vllm": vllm,
         "opencode": zen,
         "kobold": kobold,
-        "q38rocm": q38rocm,
         "fastflowlm": fastflowlm,
     }
     backend = clients.get(backend_name)

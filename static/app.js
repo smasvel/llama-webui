@@ -1,4 +1,13 @@
 (() => {
+  const BACKEND_LABELS = {
+    llamacpp: "llama.cpp engine",
+    lmstudio: "LM Studio",
+    lemonade: "Ryzen AI (NPU)",
+    vllm: "vLLM",
+    kobold: "KoboldCPP",
+    fastflowlm: "FastFlowLM",
+    opencode: "opencode.ai",
+  };
   const modelListEl = document.getElementById("model-list");
   const modelSelectEl = document.getElementById("model-select");
   let preferredChatModel = modelSelectEl.dataset.preferredModel || "";
@@ -557,12 +566,28 @@
       const label = BACKEND_LABELS[m.backend];
       const displayName = (m.name && m.name !== m.id) ? m.name : m.id;
       const typeLabel = (m.quantization || "").replace("remote opencode.ai (", "").replace(")", "");
-      opt.textContent = `${displayName} · ${typeLabel || label || m.backend}`;
+      const maxContext = Number(m.max_context_length || m.context_window_tokens || 0);
+      const contextLabel = maxContext > 0
+        ? ` · ${maxContext >= 1_000_000 ? (maxContext / 1_000_000).toFixed(1) + "M" : Math.round(maxContext / 1024) + "K"} ctx`
+        : "";
+      opt.textContent = `${displayName} · ${typeLabel || label || m.backend}${contextLabel}`;
       opt.title = opt.textContent;
       modelSelectEl.appendChild(opt);
     }
     if (loaded.some((m) => m.id === previous)) {
       modelSelectEl.value = previous;
+    } else if (loaded.length) {
+      // A saved preference can outlive its model (e.g. after a model is renamed or
+      // replaced). Keep the "unavailable" notice visible but actually select a loaded
+      // model so chat requests have a target instead of silently sending no model.
+      modelSelectEl.value = loaded[0].id;
+      preferredChatModel = modelSelectEl.value;
+      fetch("/api/chat/model-preference", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({model: modelSelectEl.value}),
+        keepalive: true,
+      }).catch(() => {});
     }
     // The selector is width-capped and truncates long ids — expose the full current
     // name on hover so nothing is lost.

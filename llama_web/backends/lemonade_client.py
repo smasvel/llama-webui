@@ -456,7 +456,7 @@ def list_models() -> list[dict]:
     seen_ids = set()
     for m in models_resp.json().get("data", []):
         # This catalog item is served by llama_web's local q38rocm backend, which
-        # downloads the same repository's Vulkan-compatible Q3_K_M variant.
+        # serves the iMatrix NVFP4 MTP GGUF from the llama-web model library.
         if m.get("id") == q38rocm_client._CATALOG_ID:
             continue
         if m.get("id") in deleted_model_ids:

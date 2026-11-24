@@ -3,8 +3,9 @@
 set -euo pipefail
 
 project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-model_name=Qwen3.8-27B-Q3_K_M.gguf
-model_target="$project_dir/data/q38rocm/models/$model_name"
+model_library=${LLAMA_MODEL_LIBRARY:-$HOME/.local/share/llama-web/models}
+model_name=Qwen3.8-27B-iMatrix-NVFP4-MTP.gguf
+model_target=${Q38ROCM_MODEL_PATH:-$model_library/cdiamond/Qwen3.8-27B-iMatrix-NVFP4-MTP-GGUF/$model_name}
 
 usage() {
   cat <<EOF
@@ -72,7 +73,7 @@ if [[ $(realpath -- "$model_source") != $(realpath -m -- "$model_target") ]]; th
     echo 'Move it aside or remove it, then rerun the installer.' >&2
     exit 1
   fi
-  echo "Copying model into the q38rocm backend directory. This may take a while."
+  echo "Copying model into the llama-web model library. This may take a while."
   cp --reflink=auto --sparse=always -- "$model_source" "$model_target"
 fi
 

@@ -822,15 +822,26 @@ Tailscale Serve on the host as described above, then open **Help → Connect ove
 Chat** and sign in. Sign in with the
 administrator credentials created above.
 
-If you skipped automatic runtime installation, install and start a supported runtime. Configure its URL
-and credentials under Settings. LM Studio's default endpoint is
-`http://localhost:1234`; Lemonade's is `http://localhost:13305`. Download a model
-and load it from Models. The first-time Ubuntu installer offers a confirmed
-download when Lemonade is available; other models remain available in Downloads.
-Hearth does not start or load KoboldCPP by default. Start it and load a model explicitly
-from Models when needed, so it does not consume memory during normal startup.
+llama-web supports llama.cpp services only. The **Models** page lists GGUFs in the
+llama-web model library (`~/.local/share/llama-web/models`, override with
+`LLAMA_MODEL_LIBRARY`) and the Qwen 3.8 model served by the q38rocm llama.cpp
+server. Download a GGUF from **Downloads** or upload one on the Models page, then
+load it there. Uploads and catalog downloads both land in that library, so newly
+downloaded models appear in the llama.cpp engine group. Models served from other
+Hearth runtimes are not shown.
 
-### Optional q38rocm backend
+
+### Qwen 3.8 on the llama.cpp engine
+
+The q38rocm service has been retired. The Qwen 3.8 GGUF is now served directly
+by `llama-web-engine.service` (`llama-server` on port 18473). Set `LLAMA_MODEL`
+and `LLAMA_ARGS` in `~/.config/llama-web/server.conf`; the stable configuration
+for this 27B NVFP4 quant on Radeon 890M uses Vulkan, Flash Attention off, FP16 KV,
+a 16,384-token context, and a repeat penalty of 1.05. The engine reads its model
+from the llama-web library, and Models shows a single llama.cpp group.
+
+The legacy q38rocm installers below are retained for reference only; running them
+will reinstall a service that llama-web no longer uses.
 
 For one-command installation of Hearth with the optional q38rocm Qwen 3.8
 backend on Ubuntu or Debian, run this from the project checkout:
@@ -840,27 +851,29 @@ bash deploy/install-hearth-q38rocm.sh
 ```
 
 The installer accepts the model path as its first argument, or finds it if there
-is exactly one `Qwen3.8-27B-Q3_K_M.gguf` in the Hugging Face cache or already in
-the backend folder. For example:
+is exactly one `Qwen3.8-27B-iMatrix-NVFP4-MTP.gguf` in the Hugging Face cache or
+already in the llama-web model library. For example:
 
 ```bash
-bash deploy/install-hearth-q38rocm.sh /path/to/Qwen3.8-27B-Q3_K_M.gguf --skip-browser
+bash deploy/install-hearth-q38rocm.sh /path/to/Qwen3.8-27B-iMatrix-NVFP4-MTP.gguf --skip-browser
 ```
 
 The model weights are not downloaded by this installer. It installs the Mesa
 RADV Vulkan runtime and build dependencies with `sudo apt-get`, checks whether
-Vulkan detects the Radeon GPU, copies the model into the backend, builds q38rocm,
-installs its on-demand user service, and runs the standard Hearth first-time
-setup. The service expects this exact filename; it is a Q3_K_M quant, not a
-ROCmFP4 FAST model. On Radeon 890M (gfx1150), q38rocm uses Vulkan hardware
-acceleration with a default 131,072-token loaded context (native maximum: 262,144)
-and FP16 KV cache (about 8 GiB of attention cache at the default window).
-Hearth installs the `speed` profile with logical batches of 2,048, physical
-microbatches of 64 to bound workspace, and prompt caching limited to 2 GiB. Flash Attention
-is disabled because it corrupts this model's output on the pinned Radeon engine,
-including with FP16 cache; CPU and Vulkan without Flash Attention pass the tool probe.
-On this Vulkan
-device Hearth disables MTP: upstream reports roughly 0% MTP draft acceptance
+Vulkan detects the Radeon GPU, copies the model into the llama-web model library,
+builds q38rocm, installs its on-demand user service, and runs the standard llama-web first-time
+setup. The service expects this exact filename from the model library; it is an
+iMatrix NVFP4 MTP quant. On Radeon 890M (gfx1150), q38rocm uses Vulkan hardware
+acceleration with a default 16,384-token loaded context (native maximum: 262,144)
+and FP16 KV cache with Flash Attention off. The pinned engine emits garbled output
+for this NVFP4 quant when Flash Attention is on; a larger FP16 KV window also
+exhausts the Vulkan device on this GPU. Although the model file advertises a
+262,144-token maximum, a 65,536-token served window is not usable here: FP16 KV
+crashes the Vulkan device, and q8_0 KV (which needs Flash Attention) produces
+corrupt output. llama-web therefore caps the served window at 16,384 tokens.
+It installs the `safe` profile with physical microbatches of 64, prompt caching
+disabled, and a repeat penalty of 1.05. On this Vulkan
+device llama-web disables MTP: upstream reports roughly 0% MTP draft acceptance
 on Vulkan0 in this engine, while MTP is supported on ROCm0. Upstream's higher
 published decode results were measured on a Radeon 8060S, not this 890M, so expect
 lower throughput on this host. Full-context prefill and generation can be slow,
@@ -911,10 +924,10 @@ Model-test handoff checks use each backend's live inventory to avoid false failu
 from stale loaded-state metadata in the combined Models view.
 Hearth chat also preserves the requested single- or multi-select mode for structured
 OpenCode questions when a backend omits that optional field.
-The Downloads page lists `julianmb/Qwen-3.8-27B-ROCmFP4-FAST-GGUF` under q38rocm
-using its actual Hugging Face repository ID, not a generated slug, and downloads the
-Vulkan-compatible Q3_K_M GGUF into q38rocm's model directory. If the same file is
-already in Lemonade's Hugging Face cache, Hearth copies that cached file rather
+The Downloads page lists `cdiamond/Qwen3.8-27B-iMatrix-NVFP4-MTP-GGUF` under q38rocm
+using its actual Hugging Face repository ID, not a generated slug, and stores the
+iMatrix NVFP4 MTP GGUF in the llama-web model library. If the same file is
+already in Lemonade's Hugging Face cache, llama-web copies that cached file rather
 than downloading another copy. The model is assigned to q38rocm in Models, not
 Lemonade.
 Model loading and lifecycle controls are on **Models**. Deletion is blocked only for

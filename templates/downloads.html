@@ -8,7 +8,7 @@
   <title>Download Models — llama-web</title>
   <link rel="stylesheet" href="{{ asset('style.css') }}" />
 </head>
-<body>
+<body class="downloads-page">
   <div class="app">
     <main class="chat">
       <header class="chat-header">
@@ -22,13 +22,7 @@
           <a class="console-tab" href="{{ url_for('users_page') }}">Users</a>
           <a class="console-tab" href="{{ url_for('settings_page') }}">Settings</a>
         </nav>
-        <div id="system-stats" class="system-stats" title="System CPU / RAM / disk usage">
-          <span id="stat-cpu">CPU –</span>
-          <span id="stat-ram">RAM –</span>
-          <span id="stat-disk">Disk –</span>
-          <span id="stat-temp"></span>
-        </div>
-        <div class="chat-header-actions" style="margin-left: auto;">
+        <div class="chat-header-actions" style="margin-left:auto;">
           <span class="hint">{{ username }}</span>
           <form method="post" action="{{ url_for('logout') }}" class="logout-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -40,225 +34,50 @@
       <div class="console-body">
         <div class="console-head">
           <h1>Download Models</h1>
-            <div class="download-tool-filters" aria-label="Filter search results by tool calling support">
-              <strong>Tool calling filters:</strong>
-              <label><input data-exclude-unknown-tools type="checkbox" /> Exclude unknown support</label>
-              <label><input data-tools-backend="lemonade" type="checkbox" /> Lemonade</label>
-              <label><input data-tools-backend="vllm" type="checkbox" /> vLLM</label>
-              <label><input data-tools-backend="lmstudio" type="checkbox" /> LM Studio</label>
-              <label><input data-tools-backend="kobold" type="checkbox" /> KoboldCPP</label>
-
-              <label><input data-tools-backend="q38rocm" type="checkbox" /> q38rocm</label>
-            </div>
-            <p class="hint">Exclude unknown support to hide models whose catalog does not say whether they support tool calling. Backend filters show only models that declare support for that backend. Catalog metadata may be incomplete; backend configuration may also be required.</p>
-            <div class="download-size-filters" aria-label="Filter models by parameter count">
-              <strong>Model size:</strong>
-              <label><input data-parameter-band="small" type="checkbox" /> Small (up to 4B)</label>
-              <label><input data-parameter-band="medium" type="checkbox" /> Medium (over 4B to 13B)</label>
-              <label><input data-parameter-band="large" type="checkbox" /> Large (over 13B)</label>
-            </div>
-            <p class="hint">Size filters use reported parameter counts or a size stated in the model name. Models without a recognizable parameter count are hidden while a size filter is active.</p>
-
+          <div class="download-tool-filters" aria-label="Filter GGUF models by tool calling support">
+            <strong>Tool calling filters:</strong>
+            <label><input id="filter-tool-calling" type="checkbox" checked /> Tool calling only</label>
+            <label><input id="filter-exclude-unknown-tools" type="checkbox" /> Exclude unknown support</label>
+          </div>
+          <p class="hint">Tool calling support comes from the model's public catalog metadata, which may be incomplete.</p>
+          <div class="download-size-filters" aria-label="Filter models by parameter count">
+            <strong>Model size:</strong>
+            <label><input data-parameter-band="small" type="checkbox" /> Small (up to 4B)</label>
+            <label><input data-parameter-band="medium" type="checkbox" /> Medium (over 4B to 13B)</label>
+            <label><input data-parameter-band="large" type="checkbox" /> Large (over 13B)</label>
+          </div>
+          <p class="hint">Size filters use reported parameter counts or a size stated in the model name.</p>
           <p class="hint">
-            Search Ryzen AI (Lemonade)'s catalog or Hugging Face and download directly, or
-            resolve-and-download by exact name. Once downloaded, loading/unloading/deleting a
-            model still happens from the Models panel in the chat window.
+            Search public GGUF repositories for llama.cpp models. Downloads go straight into
+            the llama-web model library; load the model from the
+            <a href="{{ url_for('models_page') }}">Models page</a> when it finishes.
           </p>
         </div>
 
-        <div id="getting-started-banner" class="getting-started-banner hidden">
-          <button id="getting-started-dismiss" class="getting-started-dismiss" type="button" title="Dismiss" aria-label="Dismiss">&times;</button>
-          <h2 style="margin-top: 0;">New to llama-web? Start here.</h2>
-          <p class="hint">
-            The Lemonade search starts empty, and its catalog is browsed automatically when
-            the page opens. Search for <strong>Ornith-1.5-9B-GGUF</strong> or another model
-            when you want to narrow the results. Choose Download to install a model; llama-web
-            does not start model downloads automatically.
-            suggestions when available.
-          </p>
-          <p class="hint">
-            <strong>LM Studio</strong> and <strong>KoboldCPP</strong> only search Hugging Face on
-            demand (they have no built-in catalog to browse), so their sections start empty.
-            You can search for other models there if you prefer a different backend.
-          </p>
-        </div>
-
-        <div id="download-progress" class="download-progress hidden">
+        <section id="download-progress" class="download-progress span-all hidden" aria-live="polite">
           <div class="download-progress-header">
-            <strong id="download-progress-title">Downloading&hellip;</strong>
-            <div class="download-progress-actions">
-              <span id="download-progress-pct">0%</span>
-              <button id="download-cancel-btn" class="panel-btn danger hidden" type="button">
-                Cancel &amp; clear partial files
-              </button>
+            <strong id="download-title"></strong><span id="download-pct"></span>
+          </div>
+          <div class="progress-bar-track"><div id="download-bar" class="progress-bar-fill"></div></div>
+          <div id="download-detail" class="download-progress-detail hint"></div>
+        </section>
+
+        <section class="console-card span-all">
+          <h2>llama.cpp — search Hugging Face (GGUF, tool calling)</h2>
+          <form id="catalog-search" class="download-form">
+            <div class="download-row">
+              <input id="query" class="panel-input" type="search" aria-label="Model, family, or publisher"
+                     placeholder="Search models or enter owner/repository" autocomplete="off" />
+              <button class="panel-btn" type="submit">Search</button>
             </div>
-          </div>
-          <div class="progress-bar-track"><div id="download-progress-bar" class="progress-bar-fill"></div></div>
-          <div id="download-progress-detail" class="download-progress-detail hint"></div>
-          <pre id="download-progress-log" class="download-log hidden"></pre>
-        </div>
-
-        <div class="console-grid">
-          <div class="console-card span-all">
-            <h2>Video generation</h2>
-            <p class="hint">No free local video model is currently supported on this AMD integrated GPU. llama-web does not send video prompts to an external service.</p>
-          </div>
-
-          <div class="console-card span-all">
-            <h2>Search all backends</h2>
-            <p class="hint">
-              Search once to compare every supported backend. Each result identifies its
-              backend, model format, execution compatibility, download size and status, and
-              links to the verified model source used for downloading. Leave the search empty
-              to browse each backend's available catalog and popular models.
-            </p>
-            <form id="all-search-form" class="download-form">
-              <div class="download-row">
-                <input id="all-search-input" class="panel-input" type="text"
-                       placeholder="e.g. qwen coder, llama 3, phi — or leave empty to browse" autocomplete="off" />
-                <button class="panel-btn" type="submit">Search all</button>
-              </div>
-            </form>
-            <div id="all-results" class="result-grid">
-              <p class="hint">Search every backend, or submit an empty search to browse available models.</p>
-            </div>
-          </div>
-
-          <div class="console-card span-all">
-            <h2>Ryzen AI / Lemonade — catalog &amp; Hugging Face (GGUF)</h2>
-            <p class="hint">
-              Searches Lemonade's own curated catalog (llamacpp/GGUF chat models, embeddings,
-              image generation, and more) <strong>and</strong> live results from Hugging Face —
-              the same public search Lemonade's own app uses, so it finds real, current models
-              its ~111 built-in entries don't carry (e.g. "glm 5.2"). Each result shows its real download size (the default quantization for GGUF repos),
-              last-updated date,
-              likes/downloads, and a short description from the model's README.
-            </p>
-            <form id="catalog-search-form" class="download-form">
-              <div class="download-row">
-                <input id="catalog-search-input" class="panel-input" type="text" placeholder="e.g. Ornith-1.5-9B-GGUF, llama, embed, whisper" autocomplete="off" />
-                <button id="catalog-search-btn" class="panel-btn" type="submit">Search</button>
-              </div>
-            </form>
-            <div id="catalog-results" class="result-grid">
-              <p class="hint">Loading catalog&hellip;</p>
-            </div>
-          </div>
-
-          <div class="console-card span-all">
-            <h2>vLLM — suggested models &amp; Hugging Face</h2>
-            <p class="hint">
-              Below are <strong>suggested models vetted to load on vLLM</strong> — full Hugging
-              Face repos (safetensors, supported architectures, non-gated), smallest/fastest
-              first, since this is a CPU-only box. vLLM can't serve GGUF models (those go through
-              Ryzen AI / LM Studio) — sticking to these avoids the "GGUF won't load" failure. Or
-              search Hugging Face for any other causal-LM repo. Real file sizes are shown up
-              front; downloading caches the repo, and serving it happens from the Models panel's
-              Load button (see Help).
-            </p>
-            <form id="vllm-search-form" class="download-form">
-              <div class="download-row">
-                <input id="vllm-search-input" class="panel-input" type="text" placeholder="e.g. qwen2.5, llama, phi" autocomplete="off" />
-                <button id="vllm-search-btn" class="panel-btn" type="submit">Search</button>
-              </div>
-            </form>
-            <div id="vllm-results" class="result-grid">
-              <p class="hint">Search Hugging Face for a model to download.</p>
-            </div>
-          </div>
-
-
-          <div class="console-card span-all">
-            <h2>q38rocm — local Vulkan GGUF</h2>
-            <p class="hint">
-              Downloads the Q3_K_M GGUF variant from the julianmb Hugging Face repository into
-              q38rocm's model directory. The backend on this Radeon desktop uses RADV Vulkan; the
-              repository's ROCmFP4 FAST file is not the variant installed here. After download,
-              load the model from the Models page.
-            </p>
-            <form id="q38-search-form" class="download-form">
-              <div class="download-row">
-                <input id="q38-search-input" class="panel-input" type="text" placeholder="q38rocm-supported model" autocomplete="off" />
-                <button class="panel-btn" type="submit">Search</button>
-              </div>
-            </form>
-            <div id="q38-results" class="result-grid">
-              <p class="hint">Loading q38rocm's supported model&hellip;</p>
-            </div>
-          </div>
-
-          <div class="console-card span-all">
-            <h2>LM Studio — search Hugging Face (GGUF)</h2>
-            <p class="hint">
-              LM Studio has no catalog API of its own, but it installs GGUF repos straight
-              from Hugging Face — so this searches the same public GGUF index and downloads
-              the chosen repo via <code class="inline-code">lms get</code>, auto-picking a
-              quantization. Real download sizes shown up front. Or, below, resolve an exact
-              or fuzzy name / full HF URL directly.
-            </p>
-            <form id="lmstudio-search-form" class="download-form">
-              <div class="download-row">
-                <input id="lmstudio-search-input" class="panel-input" type="text" placeholder="e.g. qwen coder, llama, phi" autocomplete="off" />
-                <button id="lmstudio-search-btn" class="panel-btn" type="submit">Search</button>
-              </div>
-            </form>
-            <div id="lmstudio-results" class="result-grid">
-              <p class="hint">Search Hugging Face for a GGUF model to download.</p>
-            </div>
-            <form id="lmstudio-download-form" class="download-form" style="margin-top: 12px;">
-              <div class="download-row">
-                <input id="lmstudio-download-query" class="panel-input" type="text" placeholder="or resolve by exact name / full HF URL — e.g. qwen3-coder" autocomplete="off" />
-                <button id="lmstudio-download-btn" class="panel-btn" type="submit">Get</button>
-              </div>
-            </form>
-          </div>
-
-          <div class="console-card span-all">
-            <h2>KoboldCPP — search Hugging Face (GGUF)</h2>
-            <p class="hint">
-              KoboldCPP is a llama.cpp server that loads a single GGUF at a time. Same source
-              as LM Studio above — search Hugging Face's GGUF index and download the chosen
-              repo (a balanced quant is auto-picked). Real download sizes shown up front; once
-              downloaded, load it from the Models panel.
-            </p>
-            <form id="kobold-search-form" class="download-form">
-              <div class="download-row">
-                <input id="kobold-search-input" class="panel-input" type="text" placeholder="e.g. qwen coder, llama, mistral" autocomplete="off" />
-                <button id="kobold-search-btn" class="panel-btn" type="submit">Search</button>
-              </div>
-            </form>
-            <div id="kobold-results" class="result-grid">
-              <p class="hint">Search Hugging Face for a GGUF model to download.</p>
-            </div>
-          </div>
-
-          <div class="console-card span-all">
-            <p class="hint">
-              Face). Each result shows its real on-NPU size and whether it's already
-              downloaded. Or, below, pull an exact tag by name.
-            </p>
-            <form id="npu-search-form" class="download-form">
-              <div class="download-row">
-                <input id="npu-search-input" class="panel-input" type="text" placeholder="e.g. qwen, llama, deepseek, gpt-oss" autocomplete="off" />
-                <button id="npu-search-btn" class="panel-btn" type="submit">Search</button>
-              </div>
-            </form>
-            <div id="npu-results" class="result-grid">
-              <p class="hint">Loading NPU catalog&hellip;</p>
-            </div>
-            <form id="npu-download-form" class="download-form" style="margin-top: 12px;">
-              <div class="download-row">
-                <input id="npu-download-query" class="panel-input" type="text" placeholder="or pull an exact tag — e.g. qwen3.5:9b" autocomplete="off" />
-                <button id="npu-download-btn" class="panel-btn" type="submit">Get</button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+          <p id="catalog-status" class="hint" role="status"></p>
+          <div id="catalog-results" class="result-grid"></div>
+          <a id="catalog-all" href="https://huggingface.co/models?library=gguf&filter=function-calling">Browse the full tool-calling GGUF catalog</a>
+        </section>
       </div>
     </main>
   </div>
-
-  <script src="{{ asset('system_stats.js') }}"></script>
-  <script src="{{ asset('downloads.js') }}"></script>
+  <script type="module" src="{{ asset('catalog.js') }}"></script>
 </body>
 </html>

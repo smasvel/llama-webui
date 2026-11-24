@@ -15,15 +15,19 @@ from llama_web.storage import settings_store
 
 SERVICE_NAME = "q38rocm.service"
 _DEFAULT_BASE_URL = "http://127.0.0.1:8008"
-_MODEL_ID = "q38rocm/Qwen3.8-27B-Q3_K_M"
-_MODEL_NAME = "Qwen3.8-27B-Q3_K_M"
-_CATALOG_ID = "julianmb-Qwen-3.8-27B-ROCmFP4-FAST-GGUF"
-_HF_REPO = "julianmb/Qwen-3.8-27B-ROCmFP4-FAST-GGUF"
-_HF_FILE = "Qwen3.8-27B-Q3_K_M.gguf"
+_MODEL_ID = "q38rocm/Qwen3.8-27B-iMatrix-NVFP4-MTP"
+_MODEL_NAME = "Qwen3.8-27B-iMatrix-NVFP4-MTP"
+_CATALOG_ID = "cdiamond-Qwen3.8-27B-iMatrix-NVFP4-MTP-GGUF"
+_HF_REPO = "cdiamond/Qwen3.8-27B-iMatrix-NVFP4-MTP-GGUF"
+_HF_FILE = "Qwen3.8-27B-iMatrix-NVFP4-MTP.gguf"
 _HF_URL = f"https://huggingface.co/{_HF_REPO}/resolve/main/{_HF_FILE}"
+# Keep q38rocm's weights isolated from Hearth: default to the llama-web model library.
+_MODEL_LIBRARY = Path(os.environ.get(
+    "LLAMA_MODEL_LIBRARY", Path.home() / ".local/share/llama-web/models",
+))
 _MODEL_PATH = Path(os.environ.get(
     "Q38ROCM_MODEL_PATH",
-    Path(__file__).resolve().parents[2] / "data/q38rocm/models" / _HF_FILE,
+    _MODEL_LIBRARY / "cdiamond/Qwen3.8-27B-iMatrix-NVFP4-MTP-GGUF" / _HF_FILE,
 ))
 _CONTEXT = 131072
 
@@ -51,12 +55,12 @@ class Q38RocmError(RuntimeError):
 
 def search_catalog(query: str = "") -> list[dict]:
     """Expose the one GGUF variant this local Vulkan build is configured to serve."""
-    haystack = f"{_CATALOG_ID} {_HF_REPO} {_HF_FILE} qwen 3.8 27b gguf q3 k m rocm fp4 fast".lower()
+    haystack = f"{_CATALOG_ID} {_HF_REPO} {_HF_FILE} qwen 3.8 27b gguf imatrix nvfp4 mtp".lower()
     terms = re.findall(r"[a-z0-9]+", (query or "").lower())
     if terms and not all(term in haystack for term in terms):
         return []
     size_gb = (_MODEL_PATH.stat().st_size / 1_000_000_000
-               if _MODEL_PATH.is_file() else 13.49)
+               if _MODEL_PATH.is_file() else 17.13)
     return [{
         # Use the real Hugging Face repo ID as the visible/searchable result name.
         # A synthetic slug made the catalog entry look unrelated to its source.
@@ -65,12 +69,12 @@ def search_catalog(query: str = "") -> list[dict]:
         "filename": _HF_FILE,
         "repo_id": _HF_REPO,
         "size_gb": round(size_gb, 2),
-        "labels": ["chat", "tool-calling", "gguf", "q3_k_m"],
+        "labels": ["chat", "tool-calling", "gguf", "imatrix-nvfp4-mtp"],
         "parameter_size": "27B",
         "max_context_length": 262144,
         "supports_tool_calling": True,
-        "format": "GGUF (Q3_K_M)",
-        "description": "Downloads the Q3_K_M GGUF variant supported by this desktop's RADV Vulkan q38rocm build.",
+        "format": "GGUF (iMatrix-NVFP4-MTP)",
+        "description": "The iMatrix NVFP4 MTP GGUF served by this desktop's RADV Vulkan q38rocm build.",
         "downloaded": _MODEL_PATH.is_file(),
         "suggested": True,
         "source": "huggingface",
@@ -119,7 +123,7 @@ def _copy_cached_model(source: Path, part_path: Path, cancelled=None):
 
 
 def download_model(model_id: str, cancelled=None):
-    """Stream the supported GGUF from Hugging Face into q38rocm's model directory."""
+    """Stream the supported GGUF from Hugging Face into the llama-web model library."""
     if model_id not in (_CATALOG_ID, _HF_REPO, f"{_HF_REPO}:{_HF_FILE}"):
         raise Q38RocmError(f"Unsupported q38rocm download: {model_id}")
     _MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -265,7 +269,7 @@ def list_models() -> list[dict]:
     return [{
         "id": _MODEL_ID,
         "type": "llm",
-        "publisher": "julianmb",
+        "publisher": "cdiamond",
         "state": "loaded" if served else "not-loaded",
         "size_gb": round(_MODEL_PATH.stat().st_size / 1e9, 2),
         "loaded_context_length": context if served else None,
@@ -273,7 +277,7 @@ def list_models() -> list[dict]:
         "max_context_length": 262144,
         "server_model_id": (served or {}).get("id", _MODEL_NAME),
         "compatibility_type": "gguf",
-        "quantization": "Q3_K_M",
+        "quantization": "iMatrix-NVFP4-MTP",
         "deletable": False,
         "lan_compatible": False,
     }]

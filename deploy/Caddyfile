@@ -5,5 +5,9 @@
 
 http://:18471 {
 	bind 127.0.0.1
-	reverse_proxy 127.0.0.1:18474
+	reverse_proxy https://127.0.0.1:18474 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
 }

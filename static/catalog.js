@@ -1,38 +1,27 @@
 const query = document.querySelector('#query');
 const results = document.querySelector('#catalog-results');
 const status = document.querySelector('#catalog-status');
+const toolOnlyEl = document.querySelector('#filter-tool-calling');
+const excludeUnknownEl = document.querySelector('#filter-exclude-unknown-tools');
+const sizeFilterEls = [...document.querySelectorAll('[data-parameter-band]')];
 let request;
+let foundModels = [];
 
-async function search() {
-  request?.abort();
-  request = new AbortController();
-  const signal = request.signal;
-  const term = query.value.trim();
-  const catalog = new URL('https://huggingface.co/models');
-  catalog.searchParams.set('library', 'gguf');
-  catalog.searchParams.set('search', term);
-  document.querySelector('#catalog-all').href = catalog.href;
-  if (/^[\w.-]+\/[\w.-]+$/.test(term)) {
-    results.replaceChildren(repositoryCard(term));
-    status.textContent = 'Choose a GGUF file from this repository.';
-    return;
-  }
-  const url = new URL('https://huggingface.co/api/models');
-  url.search = new URLSearchParams({filter: 'gguf', search: term, sort: 'downloads', direction: '-1', limit: '50'});
-  results.replaceChildren();
-  status.textContent = 'Searching public GGUF models…';
-  try {
-    const response = await fetch(url, {signal});
-    if (!response.ok) throw new Error();
-    const models = await response.json();
-    if (signal.aborted) return;
-    const ids = models.map(model => model.id);
-    if (/^[\w.-]+\/[\w.-]+$/.test(term) && !ids.includes(term)) ids.unshift(term);
-    for (const id of ids) results.append(repositoryCard(id));
-    status.textContent = ids.length ? `Showing ${ids.length} matching repositories by downloads. Select one to view its files.` : 'No matching public GGUF repositories.';
-  } catch {
-    if (!signal.aborted) status.textContent = 'Search is unavailable. Open the full catalog below to continue.';
-  }
+function toolSupport(model) {
+  const tags = (model.tags || []).map(tag => String(tag).toLowerCase());
+  if (tags.includes('function-calling') || tags.includes('tool-calling')) return true;
+  return null; // Hugging Face does not explicitly report "no tool calling".
+}
+
+function parameterCount(model) {
+  const text = [model.id, (model.tags || []).join(' ')].join(' ');
+  const match = text.match(/(?:^|[^\d])(\d+(?:\.\d+)?)\s*b(?:illion)?\b/i);
+  return match ? Number(match[1]) : null;
+}
+
+function sizeBand(count) {
+  if (count == null) return null;
+  return count <= 4 ? 'small' : count <= 13 ? 'medium' : 'large';
 }
 
 function element(tag, className, text) {
@@ -47,39 +36,153 @@ function bytes(n) {
   return n >= 1024 ** 3 ? (n / 1024 ** 3).toFixed(2) + ' GiB' : (n / 1024 ** 2).toFixed(1) + ' MiB';
 }
 
-function repositoryCard(repo) {
-  const card = element('div', 'model-card', '');
-  const title = element('strong', 'model-name', repo);
-  const choose = element('button', 'panel-btn', 'Choose file to download');
-  card.append(title, choose);
-  choose.addEventListener('click', async () => {
-    choose.disabled = true;
+function formatCount(n) {
+  if (n == null) return null;
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function formatDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString();
+}
+
+function metaParts(model) {
+  const parts = [{ text: 'llama.cpp (GGUF)' }, { text: bytes(model.usedStorage || model.safetensors?.total), key: 'size' }];
+  if (toolSupport(model)) parts.unshift({ text: 'supports tool calling' });
+  if (model.pipeline_tag) parts.push({ text: model.pipeline_tag });
+  const updated = formatDate(model.lastModified);
+  if (updated) parts.push({ text: `updated ${updated}` });
+  if (model.likes != null) parts.push({ text: `★ ${formatCount(model.likes)}` });
+  if (model.downloads != null) parts.push({ text: `${formatCount(model.downloads)} downloads` });
+  parts.push({ text: 'Hugging Face' }, { text: 'GGUF' });
+  return parts;
+}
+
+function modelCard(model) {
+  const card = element('div', 'model-card');
+  const support = toolSupport(model);
+  const badges = element('div', 'model-card-badges');
+  badges.append(element('span', 'badge', `tool calling: ${support ? 'yes' : 'unknown'}`));
+  const top = element('div', 'model-card-top');
+  const info = element('div');
+  const meta = element('div', 'model-meta');
+  let sizeEl = null;
+  metaParts(model).forEach((part, index) => {
+    if (index) meta.append(document.createTextNode(' · '));
+    const span = element('span', part.key === 'size' ? 'model-size-value' : '', part.text);
+    meta.append(span);
+    if (part.key === 'size') sizeEl = span;
+  });
+  info.append(element('div', 'model-name', model.id), meta);
+  top.append(info, badges);
+  const actions = element('div', 'model-card-actions');
+  const source = element('a', 'panel-btn secondary', 'Model source');
+  source.href = `https://huggingface.co/${model.id}`;
+  source.target = '_blank';
+  source.rel = 'noopener noreferrer';
+  const download = element('button', 'panel-btn', 'Download');
+  actions.append(source, download);
+  card.append(top, actions);
+  download.addEventListener('click', async () => {
+    download.disabled = true;
+    download.textContent = 'Loading files…';
     try {
-      const response = await fetch('/api/downloads/files?' + new URLSearchParams({repo}));
-      if (!response.ok) throw new Error();
-      const files = await response.json();
-      if (!files.length) { choose.textContent = 'No GGUF files'; return; }
+      const res = await fetch('/api/downloads/files?' + new URLSearchParams({ repo: model.id }));
+      if (!res.ok) throw new Error();
+      const files = await res.json();
+      if (!files.length) { download.textContent = 'No GGUF files'; return; }
       const select = element('select', 'panel-input', '');
-      select.setAttribute('aria-label', 'GGUF file for ' + repo);
+      select.setAttribute('aria-label', 'GGUF file for ' + model.id);
       for (const file of files) select.add(new Option(file.name + ' · ' + bytes(file.size), file.name));
-      const button = element('button', 'panel-btn', 'Download');
+      const start = element('button', 'panel-btn', 'Download');
       const feedback = element('p', 'hint', '');
-      button.addEventListener('click', async () => {
-        button.disabled = true;
+      start.addEventListener('click', async () => {
+        start.disabled = true;
         feedback.textContent = 'Starting download…';
         try {
-          const res = await fetch('/api/downloads', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({repo, file:select.value})});
-          if (!res.ok) throw new Error((await res.json()).error || 'Could not start download.');
-          renderProgress(await res.json());
-          document.querySelector('#download-progress').scrollIntoView({block:'nearest'});
+          const response = await fetch('/api/downloads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repo: model.id, file: select.value }),
+          });
+          if (!response.ok) throw new Error((await response.json()).error || 'Could not start download.');
+          renderProgress(await response.json());
+          document.querySelector('#download-progress').scrollIntoView({ block: 'nearest' });
           feedback.textContent = '';
-        } catch (error) { feedback.textContent = error.message; }
-        finally { button.disabled = false; }
+        } catch (error) {
+          feedback.textContent = error.message;
+          start.disabled = false;
+        }
       });
-      choose.replaceWith(select, button, feedback);
-    } catch { choose.disabled = false; choose.textContent = 'Retry loading files'; }
+      download.replaceWith(select, start, feedback);
+    } catch {
+      download.disabled = false;
+      download.textContent = 'Retry loading files';
+    }
   });
+  card.dataset.repo = model.id;
+  card.dataset.sizeEl = sizeEl ? 'yes' : '';
   return card;
+}
+
+async function enrichSizes(cards) {
+  await Promise.allSettled(cards.slice(0, 12).map(async card => {
+    const span = card.querySelector('.model-size-value');
+    if (!span) return;
+    try {
+      const res = await fetch('/api/downloads/files?' + new URLSearchParams({ repo: card.dataset.repo }));
+      if (!res.ok) return;
+      const files = await res.json();
+      const largest = files.filter(f => String(f.name).toLowerCase().endsWith('.gguf'))
+        .reduce((max, f) => Math.max(max, Number(f.size) || 0), 0);
+      if (largest > 0) {
+        span.textContent = bytes(largest);
+        span.title = 'Largest GGUF file in this repository';
+      }
+    } catch { /* keep the catalog size */ }
+  }));
+}
+
+function render() {
+  results.replaceChildren();
+  let models = foundModels;
+  if (toolOnlyEl?.checked) models = models.filter(model => toolSupport(model) === true);
+  if (excludeUnknownEl?.checked) models = models.filter(model => toolSupport(model) !== null);
+  const bands = new Set(sizeFilterEls.filter(el => el.checked).map(el => el.dataset.parameterBand));
+  if (bands.size) models = models.filter(model => bands.has(sizeBand(parameterCount(model))));
+  const cards = models.map(modelCard);
+  for (const card of cards) results.append(card);
+  if (cards.length) enrichSizes(cards);
+  status.textContent = models.length
+    ? `Showing ${models.length} llama.cpp GGUF models. Select a file to download.`
+    : (foundModels.length ? 'No models match the selected filters.' : 'No matching public GGUF repositories.');
+}
+
+async function search() {
+  request?.abort();
+  request = new AbortController();
+  const signal = request.signal;
+  const term = query.value.trim() || 'tool calling';
+  const catalog = new URL('https://huggingface.co/models');
+  catalog.searchParams.set('library', 'gguf');
+  catalog.searchParams.set('filter', toolOnlyEl?.checked ? 'function-calling' : '');
+  catalog.searchParams.set('search', term);
+  document.querySelector('#catalog-all').href = catalog.href;
+  const url = new URL('https://huggingface.co/api/models');
+  url.search = new URLSearchParams({ filter: 'gguf', search: term, sort: 'downloads', direction: '-1', limit: '50', full: 'true' });
+  status.textContent = 'Searching public GGUF models…';
+  try {
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error();
+    foundModels = (await response.json()).filter(model => model?.id);
+    if (signal.aborted) return;
+    render();
+  } catch {
+    if (!signal.aborted) status.textContent = 'Search is unavailable. Open the full catalog below to continue.';
+  }
 }
 
 function renderProgress(job) {
@@ -106,5 +209,7 @@ document.querySelector('#catalog-search').addEventListener('submit', event => {
   event.preventDefault();
   search();
 });
-
+for (const el of [toolOnlyEl, excludeUnknownEl, ...sizeFilterEls]) {
+  el?.addEventListener('change', render);
+}
 search();

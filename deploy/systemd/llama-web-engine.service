@@ -3,7 +3,7 @@ Description=llama-web inference (llama.cpp)
 
 [Service]
 EnvironmentFile=%h/.config/llama-web/server.conf
-ExecStart=/usr/bin/env ${LLAMA_SERVER} --model ${LLAMA_MODEL} --host 127.0.0.1 --port 18473 --api-key-file "%h/.config/llama-web/engine-key" --metrics --no-webui
+ExecStart=/usr/bin/env ${LLAMA_SERVER} --model ${LLAMA_MODEL} --host 127.0.0.1 --port 18473 --api-key-file "%h/.config/llama-web/engine-key" --metrics --no-webui ${LLAMA_ARGS}
 Restart=on-failure
 RestartSec=5
 
