@@ -3039,6 +3039,13 @@ def api_agent_tasks_create():
         origin = chat_store.new_id()
         body['origin_conversation_id'] = origin
     try:
+        if not _agent_tasks.thread or not _agent_tasks.thread.is_alive():
+            _agent_tasks.start_worker(lambda: not any(
+                job['status'] in model_tests.ACTIVE for job in _model_test_registry.list()
+            ))
+        if not _agent_tasks.thread or not _agent_tasks.thread.is_alive():
+            app.logger.error('New assignment queued but the agent supervisor did not start.')
+            return jsonify({'error': 'The agent supervisor is not running; start llama-web again before assigning work.'}), 503
         task = _agent_tasks.create(body, session['user_id'], project_archive)
         if create_origin:
             chat_store.ensure_conversation(origin, session['user_id'], None, task['title'])
