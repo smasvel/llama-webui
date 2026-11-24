@@ -259,7 +259,7 @@ def load_model(identifier: str, context_length: int | None = None) -> None:
             if served_model():
                 return
             time.sleep(2)
-        raise LlamaCppError("llama.cpp engine did not become ready; inspect llama-web-engine.service logs.")
+        raise LlamaCppError("llama.cpp engine did not become ready; check the engine configuration and logs.")
     except Exception:
         # A bad window (or a model that cannot fit) must not leave the configured
         # engine dead: restore the previous config and bring it back up.
@@ -279,7 +279,7 @@ def _engine_processes() -> list[psutil.Process]:
             command = " ".join(proc.info["cmdline"] or [])
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-        if "llama-server" in command and "--port 18473" in command:
+        if "llama-server" in command and ("--port 18473" in command or "--port=18473" in command):
             found.append(proc)
     return found
 
@@ -319,12 +319,20 @@ def _start_engine_directly() -> None:
     model = _conf_value("LLAMA_MODEL")
     if not server or not model:
         raise LlamaCppError(f"llama.cpp engine is not configured in {SERVER_CONF}.")
-    args = shlex.split(_conf_value("LLAMA_ARGS") or "")
+    raw_args = _conf_value("LLAMA_ARGS") or ""
+    # Windows paths contain backslashes that POSIX shlex would consume.
+    args = shlex.split(raw_args, posix=(os.name != "nt")) if raw_args else []
+    if os.name == "nt":
+        args = [arg.strip('"') for arg in args]
     command = [server, "--model", model, "--host", "127.0.0.1", "--port", "18473",
                "--api-key-file", str(ENGINE_KEY), "--metrics", "--no-webui", *args]
     try:
-        subprocess.Popen(command, start_new_session=True,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        popen_kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
+        else:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(command, **popen_kwargs)
     except OSError as exc:
         raise LlamaCppError(f"Could not start llama.cpp engine: {exc}") from exc
 

@@ -75,7 +75,10 @@ def prepare_environment(port):
         if key in stored_values:
             unset_key(str(env_path), key)
     for path in (env_path, postgres_path):
-        os.chmod(path, 0o600)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass  # Windows ignores POSIX mode bits; protect these files with ACLs.
     return dotenv_values(env_path)
 
 

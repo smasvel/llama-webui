@@ -41,6 +41,22 @@ The script installs missing Ubuntu packages, starts PostgreSQL from
 Skip Chromium download with `--skip-browser`. To install only host packages, use
 `--no-service`.
 
+### Windows and macOS
+
+Release bundles use the platform installers instead of the systemd units:
+
+- Windows: `powershell -ExecutionPolicy Bypass -File deploy\install-release.ps1`
+- macOS: `bash deploy/install-release.sh`
+
+These install the Python environment, PostgreSQL through Docker Compose and a
+prebuilt `llama-server` for the host platform into
+`~/.local/share/llama-web/engine/`, then write `~/.config/llama-web/server.conf`
+and an engine key. Set `LLAMA_WEB_ENGINE_BINARY` to use an existing llama-server
+instead of the downloaded binary. The app is started with
+`deploy/start-llama-web.ps1` on Windows or `bash deploy/start-llama-web.sh` on
+macOS/Linux; the installer prints the URL to open (default `https://localhost:5443`).
+Docker is required for PostgreSQL and for the isolated coding-agent image on Linux.
+
 After installation, open `https://localhost:18474` and accept the self-signed
 certificate. The first visit asks you to create the administrator account.
 

@@ -22,6 +22,13 @@ def local_ipv4_addresses():
     except (OSError, subprocess.TimeoutExpired):
         out = ''
     if not out.strip():
+        # `hostname -I` is GNU/Linux only; macOS and Windows resolve the local
+        # hostname through the socket library instead.
+        try:
+            out = " ".join(socket.gethostbyname_ex(socket.gethostname())[2])
+        except OSError:
+            out = ""
+    if not out.strip():
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
                 probe.connect(('192.0.2.1', 80))
@@ -65,7 +72,10 @@ def ensure_certificate(directory, addresses=None):
         with os.fdopen(descriptor, 'wb') as handle:
             handle.write(key.private_bytes(serialization.Encoding.PEM,
                 serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
-    os.chmod(key_path, 0o600)
+    try:
+        os.chmod(key_path, 0o600)
+    except OSError:
+        pass  # Windows does not support POSIX mode bits; ACLs are the user's responsibility.
     entries = [x509.DNSName('localhost'), x509.DNSName('ai-webui.local'),
                x509.IPAddress(ipaddress.ip_address('127.0.0.1')),
                x509.IPAddress(ipaddress.ip_address('::1'))]

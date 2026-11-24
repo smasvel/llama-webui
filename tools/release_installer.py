@@ -14,11 +14,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+import requests
+
 ROOT = Path(__file__).resolve().parents[1]
 
 BACKENDS = {
     "llamacpp": ("llama.cpp engine", "http://127.0.0.1:18473", {"Windows", "Darwin", "Linux"}),
 }
+
+# Prebuilt llama-server binaries for hosts without a local build. Stable llama.cpp
+# releases only point at a nightly tag, so pin one release tag for reproducibility.
+ENGINE_TAG = "b12359"
+ENGINE_RELEASE = f"https://github.com/ggml-org/llama.cpp/releases/download/{ENGINE_TAG}"
+
 
 
 def choose_backend(system=None, input_fn=input):
@@ -41,6 +49,89 @@ def _run(command, *, cwd=ROOT):
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def _engine_asset(system, machine):
+    """Return the official llama.cpp binary asset for this platform."""
+    arm = "arm64" in machine.lower() or "aarch64" in machine.lower()
+    if system == "Windows":
+        return f"llama-{ENGINE_TAG}-bin-win-cpu-{'arm64' if arm else 'x64'}.zip", ".zip"
+    if system == "Darwin":
+        return f"llama-{ENGINE_TAG}-bin-macos-{'arm64' if arm else 'x64'}.tar.gz", ".tar.gz"
+    return f"llama-{ENGINE_TAG}-bin-ubuntu-{'arm64' if arm else 'x64'}.tar.gz", ".tar.gz"
+
+
+def _find_engine(directory):
+    for path in Path(directory).rglob("llama-server*"):
+        if path.is_file() and ("exe" in path.suffix.lower() or path.suffix == ""):
+            return path
+    return None
+
+
+def configure_engine(system, backend_url):
+    """Create the config, engine key and model library used by the local engine."""
+    import platform
+    import secrets
+    import stat
+    import tarfile
+    import zipfile
+
+    config = Path.home() / ".config" / "llama-web"
+    data = Path.home() / ".local" / "share" / "llama-web"
+    engine_dir = data / "engine"
+    library = data / "models"
+    config.mkdir(parents=True, exist_ok=True)
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    library.mkdir(parents=True, exist_ok=True)
+    key_file = config / "engine-key"
+    if not key_file.exists():
+        key_file.write_text(secrets.token_hex(32))
+
+    bundled = ROOT / "data" / "q38rocm" / "engine" / "bin" / "llama-server"
+    server = os.environ.get("LLAMA_WEB_ENGINE_BINARY")
+    if server and Path(server).exists():
+        server = Path(server)
+    else:
+        server = shutil.which("llama-server") or (bundled if bundled.exists() else None)
+    if server is None:
+        asset, suffix = _engine_asset(system, platform.machine())
+        archive = engine_dir / asset
+        print(f"Downloading llama.cpp engine ({asset})...")
+        with requests.get(f"{ENGINE_RELEASE}/{asset}", stream=True, timeout=120) as response:
+            response.raise_for_status()
+            with archive.open("wb") as handle:
+                for chunk in response.iter_content(1024 * 1024):
+                    handle.write(chunk)
+        extract_to = engine_dir / asset.rsplit(".", 1)[0]
+        extract_to.mkdir(exist_ok=True)
+        if suffix == ".zip":
+            with zipfile.ZipFile(archive) as bundle:
+                bundle.extractall(extract_to)
+        else:
+            with tarfile.open(archive) as bundle:
+                bundle.extractall(extract_to)
+        archive.unlink()
+        server = _find_engine(extract_to)
+    if server is None:
+        raise SystemExit("Could not install llama-server. Set LLAMA_WEB_ENGINE_BINARY to a llama-server executable and retry.")
+    server = Path(server)
+    if system != "Windows":
+        server.chmod(server.stat().st_mode | stat.S_IXUSR)
+
+    if system == "Windows":
+        args = "-c 16384 -b 1024 -ub 64 -t 16 --repeat-penalty 1.05 --parallel 1"
+    else:
+        gpu_layers = 99 if system == "Darwin" else 0
+        args = f"-ngl {gpu_layers} -c 16384 -b 1024 -ub 64 -t 16 --repeat-penalty 1.05 --parallel 1"
+    server_conf = config / "server.conf"
+    if not server_conf.exists():
+        server_conf.write_text(
+            f'LLAMA_SERVER="{server}"\n'
+            f'LLAMA_MODEL="{library / "model.gguf"}"\n'
+            f'LLAMA_ARGS="{args}"\n'
+            'LLAMA_ARG_CTX_SIZE=16384\n'
+        )
+    print(f"llama.cpp engine installed at {server}; download a GGUF from the Downloads page.")
+
+
 def install(args=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=BACKENDS, help="Backend key to configure instead of asking")
@@ -56,7 +147,6 @@ def install(args=None):
     options = parser.parse_args(args)
     if not 1 <= options.postgres_port <= 65535:
         parser.error("--postgres-port must be between 1 and 65535")
-    backends = backend_installer.select_backends(options)
     system = platform.system()
     if system not in {"Windows", "Darwin", "Linux"}:
         parser.error(f"Unsupported operating system: {system}")
@@ -95,8 +185,9 @@ def install(args=None):
         forwarded = list(sys.argv[1:] if args is None else args)
         # Forward the resolved choice so the child never asks twice.
         forwarded = [arg for arg in forwarded if arg != "--skip-backend-install"]
-        if not options.install_backends:
-            forwarded += (["--install-backends", *backends] if backends else ["--skip-backend-install"])
+        # The only supported runtime is llama.cpp; optional legacy runtimes are no
+        # longer installed by the release bundle.
+        forwarded.append("--skip-backend-install")
         if not any(arg == "--backend" or arg.startswith("--backend=") for arg in forwarded):
             forwarded += ["--backend", backend]
         if not any(arg == "--backend-url" or arg.startswith("--backend-url=") for arg in forwarded):
@@ -109,13 +200,10 @@ def install(args=None):
     from tools import first_time_setup as setup
 
     setup.validate_existing_installation()
-    if backends:
-        backend_installer.install_backends(backends)
-
     if not options.skip_agent_image and system == "Linux":
         setup.install_agent_runtime()
     elif system != "Linux":
-        print("The isolated coding-agent image is supported by the Linux installer; agent execution is unavailable on this platform.")
+        print("The isolated coding-agent image is only supported on Linux; agent execution is unavailable here.")
     values = setup.prepare_environment(options.postgres_port)
     os.environ["DATABASE_URL"] = values["DATABASE_URL"]
     compose = ["docker", "compose", "--env-file", str(ROOT / ".env.postgres"), "-f", str(ROOT / "compose.yaml")]
@@ -123,6 +211,7 @@ def install(args=None):
         compose += ["--project-name", options.project_name]
     _run(compose + ["up", "-d", "--wait", "postgres"])
     setup.initialize_application_storage()
+    configure_engine(system, backend_url)
     from llama_web.core.local_tls import ensure_certificate
     ensure_certificate(ROOT / 'certs')
 

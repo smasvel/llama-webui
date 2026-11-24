@@ -9,6 +9,7 @@ import queue
 import subprocess
 import re
 import secrets
+import shutil
 import ssl
 from llama_web.storage import database
 import threading
@@ -1837,6 +1838,9 @@ def api_service_status():
 @admin_required
 def api_restart_llama_web():
     import uuid
+    if os.name != "posix" or not shutil.which("systemctl"):
+        return jsonify({"ok": False,
+                        "message": "Service restart is only available on Linux with systemd. Restart llama-web manually."}), 501
     job_id = "llama_web-" + uuid.uuid4().hex[:8]
     try:
         model_metadata_store.create_restart_job(job_id, "llama_web", 1)
