@@ -724,6 +724,8 @@
     refreshConversations: () => fetchConversations(),
     loadConversation: (id) => loadConversation(id),
     getModel: () => modelSelectEl.value,
+    // Exposed for integration tests that verify rich reply rendering.
+    renderMarkdown: (text) => renderMarkdown(text, true),
   };
 
   function renderConversationList() {
@@ -1206,6 +1208,61 @@
     return html;
   }
 
+  // Inline HTML from a model reply is rendered, never executed: only a small set of
+  // presentation tags survives, with all event handlers, scripts and unsafe URLs removed.
+  const inlineHtmlTags = new Set(("b strong i em u s small br span a code pre div p ul ol li " +
+    "table thead tbody tfoot tr th td caption blockquote h1 h2 h3 h4 h5 h6 img hr").split(" "));
+  const inlineHtmlBlocked = new Set(("script style iframe object embed form input button svg math link meta").split(" "));
+  const inlineHtmlAttributes = new Set(("class title alt colspan rowspan").split(" "));
+
+  function sanitizeInlineHtml(source) {
+    const template = document.createElement("template");
+    template.innerHTML = source;
+    const root = template.content;
+    root.querySelectorAll("*").forEach((node) => {
+      const tag = node.tagName.toLowerCase();
+      if (inlineHtmlBlocked.has(tag)) {
+        node.remove();
+        return;
+      }
+      if (!inlineHtmlTags.has(tag)) {
+        node.replaceWith(...node.childNodes);
+        return;
+      }
+      [...node.attributes].forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        if (name.startsWith("on") || name === "style") {
+          node.removeAttribute(attr.name);
+          return;
+        }
+        if (tag === "a" && name === "href") {
+          try {
+            const url = new URL(attr.value, window.location.href);
+            if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) {
+              node.removeAttribute(attr.name);
+            } else {
+              node.setAttribute("target", "_blank");
+              node.setAttribute("rel", "noopener noreferrer");
+            }
+          } catch {
+            node.removeAttribute(attr.name);
+          }
+          return;
+        }
+        if (tag === "img" && name === "src") {
+          const value = attr.value.trim();
+          const safe = /^https:\/\//i.test(value) || /^\/api\//.test(value) ||
+            /^data:image\/(png|jpeg|gif|webp|avif);base64,/i.test(value);
+          if (!safe) node.removeAttribute(attr.name);
+          else node.setAttribute("referrerpolicy", "no-referrer");
+          return;
+        }
+        if (!inlineHtmlAttributes.has(name)) node.removeAttribute(attr.name);
+      });
+    });
+    return root;
+  }
+
   function renderParagraphText(text) {
     if (!text) return "";
     let html = escapeHtml(text);
@@ -1242,11 +1299,25 @@
           text.slice(cursor, match.index).split("`").length % 2 === 0) continue;
       html += renderParagraphText(text.slice(cursor, match.index));
       const alt = escapeHtml(match[1]);
-      html += `<button type="button" class="code-btn chat-load-image" data-url="${escapeHtml(url.href)}" data-alt="${alt}">Load image${alt ? `: ${alt}` : ""}</button>`;
+      html += `<img class="chat-remote-image" src="${escapeHtml(url.href)}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer" />`;
       cursor = match.index + match[0].length;
     }
     return html + renderParagraphText(text.slice(cursor));
   }
+
+  // If a remote image cannot load, offer the old explicit-load button instead of
+  // leaving a broken image in the conversation.
+  messagesEl.addEventListener("error", (event) => {
+    const img = event.target;
+    if (!img?.classList?.contains("chat-remote-image")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "code-btn chat-load-image";
+    button.dataset.url = img.src;
+    button.dataset.alt = img.alt || "";
+    button.textContent = img.alt ? `Load image: ${img.alt}` : "Load image";
+    img.replaceWith(button);
+  }, true);
 
   // Generated media stays on Hearth. Copy places image pixels on the clipboard;
   // videos use a copyable local link because browsers do not commonly support
@@ -1383,17 +1454,81 @@
     return html;
   }
 
+  function parseListBlock(lines, startIdx) {
+    const itemRe = /^(\s*)([-*+]|\d+[.)])\s+(.+)$/;
+    const first = itemRe.exec(lines[startIdx]);
+    if (!first) return null;
+    const ordered = /\d/.test(first[2]);
+    const items = [];
+    let i = startIdx;
+    while (i < lines.length) {
+      const match = itemRe.exec(lines[i]);
+      if (!match || (/\d/.test(match[2]) !== ordered)) break;
+      items.push(match[3]);
+      i++;
+    }
+    return { ordered, items, endIdx: i };
+  }
+
+  function renderListBlock(list) {
+    const tag = list.ordered ? "ol" : "ul";
+    return `<${tag} class="msg-list">` +
+      list.items.map((item) => `<li>${renderInline(item)}</li>`).join("") +
+      `</${tag}>`;
+  }
+
+  // Turn a raw JSON payload into a visual table/list instead of showing braces.
+  // The original text stays available in a collapsed <details> block.
+  function renderStructuredData(text) {
+    const source = String(text || "").trim();
+    if (!source.startsWith("[") && !source.startsWith("{")) return null;
+    let value;
+    try {
+      value = JSON.parse(source);
+    } catch {
+      return null;
+    }
+    let visual = "";
+    if (Array.isArray(value) && value.length && value.every((row) => Array.isArray(row))) {
+      visual = renderTableBlock({
+        header: value[0].map((cell) => String(cell)),
+        aligns: [],
+        body: value.slice(1).map((row) => row.map((cell) => String(cell))),
+      });
+    } else if (Array.isArray(value) && value.length && value.every((row) => row && typeof row === "object" && !Array.isArray(row))) {
+      const keys = [...new Set(value.flatMap((row) => Object.keys(row)))];
+      visual = renderTableBlock({
+        header: keys,
+        aligns: [],
+        body: value.map((row) => keys.map((key) => {
+          const cell = row[key];
+          return cell && typeof cell === "object" ? JSON.stringify(cell) : String(cell ?? "");
+        })),
+      });
+    } else if (Array.isArray(value) && value.length) {
+      visual = `<ul class="msg-list">${value.map((item) => `<li>${renderInline(typeof item === "object" ? JSON.stringify(item) : String(item))}</li>`).join("")}</ul>`;
+    } else if (value && typeof value === "object") {
+      const rows = Object.entries(value).map(([key, item]) => [key,
+        item && typeof item === "object" ? JSON.stringify(item) : String(item ?? "")]);
+      visual = renderTableBlock({ header: ["Field", "Value"], aligns: [], body: rows });
+    } else {
+      return null;
+    }
+    return `<div class="data-render">${visual}<details class="data-raw"><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre></details></div>`;
+  }
+
   function renderProse(text) {
     if (!text) return "";
     const lines = text.split("\n");
     let html = "";
     let paraBuf = [];
     const flushPara = () => {
-      if (paraBuf.length) {
-        html += renderParagraph(paraBuf.join("\n"));
-        paraBuf = [];
-      }
+      if (!paraBuf.length) return;
+      const raw = paraBuf.join("\n");
+      html += renderStructuredData(raw) || renderParagraph(raw);
+      paraBuf = [];
     };
+    const htmlLineRe = /<\/?[a-z][\w-]*[\s>]/i;
     let i = 0;
     while (i < lines.length) {
       const table = parseTableBlock(lines, i);
@@ -1403,15 +1538,43 @@
         i = table.endIdx;
         continue;
       }
-      // ATX-style headings ("### Title", optionally closed with trailing #'s). These
-      // were previously falling through to renderParagraph and showing up as literal
-      // "### Title" text in the bubble instead of an actual styled heading.
+      const list = parseListBlock(lines, i);
+      if (list) {
+        flushPara();
+        html += renderListBlock(list);
+        i = list.endIdx;
+        continue;
+      }
+      if (/^>\s?/.test(lines[i])) {
+        flushPara();
+        const quote = [];
+        while (i < lines.length && /^>\s?/.test(lines[i])) {
+          quote.push(lines[i].replace(/^>\s?/, ""));
+          i++;
+        }
+        html += `<blockquote class="msg-quote">${renderParagraph(quote.join("\n"))}</blockquote>`;
+        continue;
+      }
+      // ATX-style headings ("### Title", optionally closed with trailing #'s).
       const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(lines[i]);
       if (heading) {
         flushPara();
         const level = heading[1].length;
         html += `<h${level} class="msg-heading">${renderInline(heading[2])}</h${level}>`;
         i++;
+        continue;
+      }
+      if (htmlLineRe.test(lines[i])) {
+        flushPara();
+        const block = [lines[i]];
+        i++;
+        while (i < lines.length && lines[i].trim() !== "" && htmlLineRe.test(lines[i])) {
+          block.push(lines[i]);
+          i++;
+        }
+        const holder = document.createElement("div");
+        holder.append(sanitizeInlineHtml(block.join("\n")));
+        html += holder.innerHTML;
         continue;
       }
       paraBuf.push(lines[i]);
@@ -1548,6 +1711,8 @@
         html += renderDataChart(code);
       } else if (allowPreview && closed && ["html", "svg"].includes(previewLang)) {
         html += renderStaticPreview(code, previewLang);
+      } else if (allowPreview && closed && previewLang === "json") {
+        html += renderStructuredData(code) || renderCodeBlock(code, lang);
       } else {
         html += renderCodeBlock(code, lang);
       }

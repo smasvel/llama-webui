@@ -883,6 +883,16 @@ html, body {
   40% { opacity: 1; }
 }
 
+.msg-list { margin: 8px 0; padding-left: 22px; }
+.msg-list li { margin: 4px 0; line-height: 1.5; }
+.msg-quote { margin: 10px 0; padding: 8px 12px; border-left: 3px solid var(--accent); background: rgba(127,155,199,.08); border-radius: 0 8px 8px 0; }
+.chat-remote-image { display: block; max-width: 100%; height: auto; margin: 10px 0; border-radius: 8px; border: 1px solid var(--border); }
+.data-render { margin: 10px 0; }
+.data-render .table-block { margin-bottom: 6px; }
+.data-raw { margin-top: 4px; font-size: 12px; }
+.data-raw summary { cursor: pointer; color: var(--text-dim); }
+.data-raw pre { margin: 8px 0 0; max-height: 260px; overflow: auto; }
+
 .msg-heading {
   font-weight: 600;
   color: var(--text);

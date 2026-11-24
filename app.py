@@ -6407,6 +6407,11 @@ def api_chat():
         if not has_system_message:
             system_parts.extend([
                 "Respond in the same language the user writes in. If that's unclear, default to English.",
+                # The chat UI renders GFM headings, bullet/numbered lists, pipe tables,
+                # fenced HTML/SVG and images. Ask for those instead of raw payload dumps.
+                "Format answers for readability: use a short heading, then bullets or a "
+                "Markdown table for lists and structured data. Never paste raw JSON, tool "
+                "payloads, or markup unless the user explicitly asks for the source.",
                 # Without this, a model that's seen real ![...](/api/images/...) links
                 # earlier in the conversation (from this app's own image-generation
                 # feature) will sometimes imitate that markdown pattern in its own text
