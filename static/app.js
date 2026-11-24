@@ -1200,12 +1200,53 @@
     );
   }
 
+  // Common emoticons/shortcodes rendered as Unicode emoji. Only exact forms are
+  // mapped so URLs and ordinary text are never rewritten.
+  const EMOJI_SYMBOLS = {
+    ":)": "🙂", ":-)": "🙂", "=)": "🙂", ":D": "😀", ":-D": "😀", "=D": "😀",
+    ":(": "🙁", ":-(": "🙁", "=(": "🙁", ":'(": "😢",
+    ";)": "😉", ";-)": "😉", ":P": "😛", ":-P": "😛", ":p": "😛", ":-p": "😛",
+    ":O": "😮", ":-O": "😮", ":o": "😮", ":|": "😐", ":-|": "😐",
+    "<3": "❤️", "</3": "💔", ":D<": "😀",
+    ":smile:": "😄", ":grin:": "😁", ":joy:": "😂", ":laughing:": "😆",
+    ":wink:": "😉", ":heart:": "❤️", ":blue_heart:": "💙", ":green_heart:": "💚",
+    ":thumbsup:": "👍", ":+1:": "👍", ":-1:": "👎", ":thumbsdown:": "👎",
+    ":fire:": "🔥", ":rocket:": "🚀", ":star:": "⭐", ":sparkles:": "✨",
+    ":check:": "✅", ":white_check_mark:": "✅", ":x:": "❌", ":cross_mark:": "❌",
+    ":warning:": "⚠️", ":exclamation:": "❗", ":question:": "❓",
+    ":thinking:": "🤔", ":wave:": "👋", ":clap:": "👏", ":pray:": "🙏",
+    ":cry:": "😢", ":sob:": "😭", ":sunglasses:": "😎",
+    ":tada:": "🎉", ":party:": "🎉", ":ok:": "👌", ":ok_hand:": "👌", ":100:": "💯",
+  };
+  const EMOJI_KEYS = Object.keys(EMOJI_SYMBOLS).sort((a, b) => b.length - a.length);
+  const EMOJI_RE = new RegExp(EMOJI_KEYS.map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
+
+  function convertEmoji(text) {
+    return String(text || "").replace(EMOJI_RE, (match) => EMOJI_SYMBOLS[match] || match);
+  }
+
+  const CODE_SENTINEL = "\u0000llama_web_code_";
+  function protectCodeSpans(text) {
+    const spans = [];
+    const protectedText = String(text || "").replace(/`([^`\n]+)`/g, (_match, code) => {
+      spans.push(code);
+      return `${CODE_SENTINEL}${spans.length - 1}\u0000`;
+    });
+    return { protectedText, spans };
+  }
+
+  function restoreCodeSpans(html, spans) {
+    if (!spans.length) return html;
+    return html.replace(new RegExp(`${CODE_SENTINEL}(\\d+)\u0000`, "g"),
+      (_match, index) => `<code class="inline-code">${escapeHtml(spans[Number(index)])}</code>`);
+  }
+
   function renderInline(text) {
-    let html = escapeHtml(text);
-    html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+    const { protectedText, spans } = protectCodeSpans(text);
+    let html = escapeHtml(convertEmoji(protectedText));
     html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
     html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
-    return html;
+    return restoreCodeSpans(html, spans);
   }
 
   // Inline HTML from a model reply is rendered, never executed: only a small set of
@@ -1265,7 +1306,8 @@
 
   function renderParagraphText(text) {
     if (!text) return "";
-    let html = escapeHtml(text);
+    const { protectedText, spans } = protectCodeSpans(text);
+    let html = escapeHtml(convertEmoji(protectedText));
     html = html.replace(
       /!\[video:\s*([^\]]*)\]\((\/api\/videos\/[a-zA-Z0-9_.-]+)\)/g,
       '<div class="generated-media" data-media-type="video"><video src="$2" class="chat-video" controls playsinline preload="metadata" aria-label="$1"></video><div class="generated-media-actions"><button type="button" class="media-copy-btn">Copy link</button><button type="button" class="media-share-btn">Share</button><a class="video-download" href="$2" download>Download video</a></div></div>'
@@ -1278,10 +1320,9 @@
       /!\[([^\]]*)\]\((\/api\/images\/[a-zA-Z0-9_.-]+)\)/g,
       '<div class="generated-media" data-media-type="image"><img src="$2" alt="$1" class="chat-image" loading="lazy" /><div class="generated-media-actions"><button type="button" class="media-copy-btn">Copy image</button><button type="button" class="media-share-btn">Share</button><a class="video-download" href="$2" download>Download image</a></div></div>'
     );
-    html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
     html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
     html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
-    return html;
+    return restoreCodeSpans(html, spans);
   }
 
   function renderParagraph(text) {
