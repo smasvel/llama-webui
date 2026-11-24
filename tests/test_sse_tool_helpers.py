@@ -70,5 +70,29 @@ class TableMarkupTests(unittest.TestCase):
         self.assertNotIn("name", event["choices"][0]["delta"])
 
 
+class LeakedStreamTests(unittest.TestCase):
+    def test_normal_stream_is_not_buffered_or_rewritten(self):
+        lines = [
+            'data: ' + json.dumps({"choices": [{"index": 0, "delta": {"content": "Hello"}}]}) + '\n\n',
+            'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+            "data: [DONE]\n\n",
+        ]
+        self.assertEqual(list(helpers.repair_leaked_tool_stream(iter(lines), {})), lines)
+
+    def test_table_markup_is_repaired_even_without_offered_tools(self):
+        content = (
+            '[{"name": "table", "arguments": {"data": ['
+            '["Date", "High"], ["2026-11-24", "57.6"]]}}]<end_of_turn>'
+        )
+        lines = [
+            'data: ' + json.dumps({"choices": [{"index": 0, "delta": {"content": content}}]}) + '\n\n',
+            'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+            "data: [DONE]\n\n",
+        ]
+        out = list(helpers.repair_leaked_tool_stream(iter(lines), {"tools": []}))
+        self.assertIn("| Date | High |", "".join(out))
+        self.assertNotIn('"name": "table"', "".join(out))
+
+
 if __name__ == "__main__":
     unittest.main()

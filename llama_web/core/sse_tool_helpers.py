@@ -833,6 +833,34 @@ def _guard_streamed_tool_calls(raw_lines: list[bytes], body: dict) -> bytes | No
     return b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
 
 
+def repair_leaked_tool_stream(lines, body):
+    """Stream lines untouched unless they look like leaked tool-call markup.
+
+    Only replies that begin with JSON tool syntax are buffered and repaired; normal
+    chat replies keep streaming as before.
+    """
+    prefetch = []
+    for line in lines:
+        prefetch.append(line)
+        if len(prefetch) >= 3:
+            break
+    markers = ('"content": "[', '"content":"[', '\\"name\\"', '"name":', '<tool_call', '"arguments"')
+    suspicious = any(any(marker in str(line) for marker in markers) for line in prefetch)
+    if not suspicious:
+        yield from prefetch
+        yield from lines
+        return
+    buffered = [line.encode() if isinstance(line, str) else line
+                for line in prefetch]
+    buffered.extend(line.encode() if isinstance(line, str) else line for line in lines)
+    repaired = _guard_streamed_tool_calls(buffered, body)
+    if repaired is None:
+        yield from (line.decode() if isinstance(line, bytes) else line for line in buffered)
+        return
+    for line in repaired.decode().splitlines():
+        yield line
+
+
 def _flm_stream_lines(lines, model):
     """Normalize FLM's single-choice SSE terminator before tool repair or forwarding."""
     finished = False

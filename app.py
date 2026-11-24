@@ -6804,22 +6804,15 @@ def api_chat():
                         **extra_kwargs,
                     )
                     backend_lines = chat_jobs.cancelable_lines(backend_lines, cancel_event)
-                    if backend is llamacpp and tools_list:
-                        # This local engine serves GGUFs whose chat templates often emit
-                        # tool calls as text (e.g. `[{"name": ...}]<end_of_turn>`) instead
-                        # of OpenAI tool-call deltas. Convert that markup into proper
-                        # tool_calls before the chat loop tries to interpret the reply.
-                        buffered = [line.encode() if isinstance(line, str) else line
-                                    for line in backend_lines]
-                        repair_body = {**body, "tools": tools_list}
+                    if backend is llamacpp:
+                        # This engine's GGUF chat templates often leak tool calls as
+                        # plain content, e.g. `[{"name": ...}]<end_of_turn>` or a
+                        # `table` pseudo-tool. Repair those replies whether or not a
+                        # tool was explicitly offered on this turn.
+                        repair_body = {**body, "tools": tools_list or []}
                         if extra_kwargs.get("tool_choice") is not None:
                             repair_body["tool_choice"] = extra_kwargs["tool_choice"]
-                        repaired = sse_tool_helpers._guard_streamed_tool_calls(buffered, repair_body)
-                        if repaired is not None:
-                            backend_lines = iter(repaired.decode().splitlines())
-                        else:
-                            backend_lines = iter(line.decode() if isinstance(line, bytes) else line
-                                                 for line in buffered)
+                        backend_lines = sse_tool_helpers.repair_leaked_tool_stream(backend_lines, repair_body)
                     # Small quantized LM Studio and Lemonade/llama.cpp models can collapse
                     # into a run of one punctuation token (confirmed live with endless '/'
                     # from nullsumlabs-qwen3.8-9b-coder). Buffer those backends' rounds so
