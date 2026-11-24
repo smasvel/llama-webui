@@ -146,6 +146,11 @@ def _repair_textual_tool_calls(text: str, body: dict) -> tuple[str, list[dict]]:
             arguments = value.get("arguments")
             if arguments is None:
                 arguments = {k: v for k, v in value.items() if k not in {"function", "name"}}
+        if isinstance(name, str) and name not in allowed:
+            # Local GGUFs sometimes drop the MCP server prefix (e.g. emit
+            # `browser_navigate` instead of `playwright__browser_navigate`).
+            name = next((offered for offered in allowed
+                         if offered.split("__", 1)[-1] == name), name)
         if not isinstance(name, str) or name not in allowed:
             return None
         if isinstance(arguments, str):

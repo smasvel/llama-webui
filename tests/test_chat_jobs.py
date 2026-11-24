@@ -125,7 +125,8 @@ class BackgroundChatTests(unittest.TestCase):
         }
         with patch.object(app.lms, "chat_stream", return_value=iter([
             "data: " + json.dumps(tool_call), "data: [DONE]",
-        ])) as backend, patch.object(app.mcp_tools_client, "call_tool") as run_tool:
+        ])) as backend, patch.object(app.mcp_tools_client, "call_tool") as run_tool, \
+             patch.object(app.mcp_tools_client, "chat_tool_mode", return_value=None):
             body = {**self.body, "messages": [{"role": "user", "content": "Run Python"}]}
             with self.client.post("/api/chat", json=body, headers={"X-CSRF-Token": "test-csrf"}) as response:
                 self.assertEqual(response.status_code, 200)

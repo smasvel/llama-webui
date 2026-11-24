@@ -2763,6 +2763,17 @@ def _normalize_question_tool_calls(tool_calls, offered_tools, messages):
     return tool_calls
 
 
+def _resolve_chat_tool_name(name, offered_names):
+    """Accept bare/alias tool names the model may emit instead of the qualified name."""
+    if name in offered_names:
+        return name
+    bare = str(name).split("__", 1)[-1]
+    for candidate in offered_names:
+        if candidate.split("__", 1)[-1] == bare:
+            return candidate
+    return name
+
+
 def _test_connection(target):
     backend = target['backend']
     client = {'llamacpp': llamacpp, 'lmstudio': lms,
@@ -6448,10 +6459,11 @@ def api_chat():
             )
         )
         browser_requested = web_search.looks_like_browse_request(last_user_message)
+        chat_tool_mode = mcp_tools_client.chat_tool_mode(last_user_message) or ""
         live_lookup_requested = (
             web_enabled
             and (settings_store.get("web_search_browser_enabled") or "true") == "true"
-            and "browser" in (mcp_tools_client.chat_tool_mode(last_user_message) or "")
+            and "browser" in chat_tool_mode
         )
         prior_chat_matches = []
         if live_lookup_requested:
@@ -6718,12 +6730,18 @@ def api_chat():
             tools_list = None
             npu_handle = None
             try:
-                if live_lookup_requested:
+                if live_lookup_requested or ("python" in chat_tool_mode and web_enabled):
                     try:
                         all_mcp_tools = mcp_tools_client.ensure_started()
+                        prefixes = tuple(
+                            prefix for prefix, wanted in (
+                                ("playwright__", live_lookup_requested),
+                                ("python_repl__", "python" in chat_tool_mode),
+                            ) if wanted
+                        )
                         tools_list = mcp_tools_client.select_chat_tools(
                             [tool for tool in all_mcp_tools
-                             if tool.get("function", {}).get("name", "").startswith("playwright__")],
+                             if tool.get("function", {}).get("name", "").startswith(prefixes)],
                             last_user_message,
                             # Explicit live lookups must retain the MCP read tools
                             # so the model can verify changing values directly.
@@ -6907,7 +6925,8 @@ def api_chat():
                     for tc in tool_calls_list:
                         if cancel_event.is_set():
                             break
-                        tc_name = tc["function"]["name"]
+                        tc_name = _resolve_chat_tool_name(tc["function"]["name"], offered_names)
+                        tc["function"]["name"] = tc_name
                         arguments = tc["function"]["arguments"]
                         if tc_name not in offered_names:
                             loop_messages.append({"role": "tool", "tool_call_id": tc["id"],

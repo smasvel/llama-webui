@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from llama_web.integrations import mcp_tools_client
@@ -140,6 +141,24 @@ class PlaywrightNavigationTests(unittest.IsolatedAsyncioTestCase):
             url="https://example.org/start", title="Playwright MCP navigation",
             query="Agent browser navigation", source="playwright-mcp", ok=True,
         )
+
+
+class ServerPathTests(unittest.TestCase):
+    def test_first_existing_prefers_available_install_location(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            available = Path(directory) / "host-tool"
+            available.write_text("x")
+            self.assertEqual(
+                mcp_tools_client._first_existing([Path(directory) / "missing", available]),
+                str(available),
+            )
+
+    def test_node_and_playwright_cli_resolve_to_existing_files(self):
+        self.assertTrue(Path(mcp_tools_client._NODE_BIN).is_file())
+        self.assertTrue(Path(mcp_tools_client._PLAYWRIGHT_MCP_CLI).is_file())
 
 
 if __name__ == "__main__":

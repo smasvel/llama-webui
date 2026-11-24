@@ -53,10 +53,27 @@ def _chromium_path() -> str:
     return str(cache / f"chromium-{revision}" / "chrome-linux64/chrome")
 
 
+def _first_existing(paths):
+    """Prefer llama-web's own tools, then the host's existing install locations."""
+    for path in paths:
+        if Path(path).is_file():
+            return str(path)
+    return str(paths[0])
+
+
+_NODE_BIN = _first_existing([
+    Path.home() / ".local/share/llama_web/node/bin/node",
+    Path.home() / ".local/share/hearth/node/bin/node",
+])
+_PLAYWRIGHT_MCP_CLI = _first_existing([
+    Path.home() / ".local/share/llama_web/mcp/node_modules/@playwright/mcp/cli.js",
+    Path.home() / ".local/share/hearth/mcp/node_modules/@playwright/mcp/cli.js",
+])
+
 _SERVERS = {
     "playwright": StdioServerParameters(
-        command=os.environ.get("LLAMA_WEB_NODE_BIN", str(Path.home() / ".local/share/llama_web/node/bin/node")),
-        args=[str(Path.home() / ".local/share/llama_web/mcp/node_modules/@playwright/mcp/cli.js"), "--headless", "--browser", "chromium", "--executable-path", _chromium_path()],
+        command=os.environ.get("LLAMA_WEB_NODE_BIN", _NODE_BIN),
+        args=[os.environ.get("LLAMA_WEB_PLAYWRIGHT_MCP_CLI", _PLAYWRIGHT_MCP_CLI), "--headless", "--browser", "chromium", "--executable-path", _chromium_path()],
         env={**get_default_environment(), "DISPLAY": os.environ.get("DISPLAY", ":2")},
     ),
     "python_repl": StdioServerParameters(
