@@ -40,5 +40,35 @@ class StreamedToolRepairTests(unittest.TestCase):
         self.assertEqual(json.loads(call["function"]["arguments"]), {"q": "Durham nc"})
 
 
+class TableMarkupTests(unittest.TestCase):
+    def test_table_pseudo_tool_renders_as_a_markdown_table(self):
+        payload = (
+            '[{"name": "table", "arguments": {"data": ['
+            '["Date", "High"], ["2026-11-24", "57.6"]]}}]<end_of_turn>'
+        )
+        clean, calls = helpers._repair_textual_tool_calls(payload, BODY)
+        self.assertEqual(calls, [])
+        self.assertIn("| Date | High |", clean)
+        self.assertIn("| --- | --- |", clean)
+        self.assertIn("| 2026-11-24 | 57.6 |", clean)
+
+    def test_table_markup_stream_is_repaired_without_a_tool_round(self):
+        payload = (
+            '[{"name": "table", "arguments": {"data": ['
+            '["Date", "High"], ["2026-11-24", "57.6"]]}}]<end_of_turn>'
+        )
+        lines = [
+            b"data: " + json.dumps({"choices": [{"index": 0, "delta": {"content": payload}}]}).encode() + b"\n\n",
+            b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+            b"data: [DONE]\n\n",
+        ]
+        repaired = helpers._guard_streamed_tool_calls(lines, BODY)
+        self.assertIsNotNone(repaired)
+        event = json.loads(repaired.decode().splitlines()[0][6:])
+        self.assertEqual(event["choices"][0]["finish_reason"], "stop")
+        self.assertIn("| Date | High |", event["choices"][0]["delta"]["content"])
+        self.assertNotIn("name", event["choices"][0]["delta"])
+
+
 if __name__ == "__main__":
     unittest.main()

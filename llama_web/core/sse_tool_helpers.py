@@ -97,6 +97,24 @@ _TEXT_PARAMETER_ELEMENT_RE = re.compile(r'<parameter>(.*?)</parameter>', re.I | 
 _JSON_FENCE_RE = re.compile(r"```json[^\n]*\n(.*?)```", re.I | re.S)
 _GEMMA_TOOL_RE = re.compile(r'<\|tool_call>call:([\w.-]+)(\{.*?\})(?:<tool_call\|>|<turn\|>)', re.S)
 
+def _markdown_table(data) -> str:
+    """Render a 2-D array emitted as a `table` tool call as a GFM pipe table."""
+    if not isinstance(data, list) or not data:
+        return ""
+    rows = [[str(cell) for cell in row] for row in data if isinstance(row, list)]
+    if not rows:
+        return ""
+    width = max(len(row) for row in rows)
+    rows = [row + [""] * (width - len(row)) for row in rows]
+
+    def line(cells):
+        return "| " + " | ".join(cell.replace("|", "\\|").replace("\n", " ") for cell in cells) + " |"
+
+    rendered = [line(rows[0]), "| " + " | ".join(["---"] * width) + " |"]
+    rendered.extend(line(row) for row in rows[1:])
+    return "\n".join(rendered)
+
+
 def _repair_textual_tool_calls(text: str, body: dict) -> tuple[str, list[dict]]:
     """Convert model-native tool markup leaked as content into OpenAI tool calls.
 
@@ -159,8 +177,23 @@ def _repair_textual_tool_calls(text: str, body: dict) -> tuple[str, list[dict]]:
         except (TypeError, ValueError):
             value = None
         candidates = value if isinstance(value, list) else ([value] if isinstance(value, dict) else [])
-        specs = [spec_from_value(item) for item in candidates]
-        if specs and all(specs) and len(specs) == len(candidates):
+        specs = []
+        rendered_tables = []
+        recognised = bool(candidates)
+        for item in candidates:
+            name = item.get("name") if isinstance(item, dict) else None
+            args = item.get("arguments") if isinstance(item, dict) else None
+            if name == "table" and isinstance(args, dict) and isinstance(args.get("data"), list):
+                table = _markdown_table(args["data"])
+                if table:
+                    rendered_tables.append(table)
+                    continue
+            spec = spec_from_value(item)
+            if not spec:
+                recognised = False
+                break
+            specs.append(spec)
+        if recognised and (specs or rendered_tables):
             calls = []
             for name, arguments in specs:
                 arguments = _restore_schema_types(arguments, schemas.get(name, {}))
@@ -169,7 +202,8 @@ def _repair_textual_tool_calls(text: str, body: dict) -> tuple[str, list[dict]]:
                     "type": "function",
                     "function": {"name": name, "arguments": json.dumps(arguments, separators=(",", ":"))},
                 })
-            return "", calls
+            # A `table` pseudo-tool is rendered for the user, not sent back to the model.
+            return "\n\n".join(rendered_tables), calls
 
     entries = []  # (span, [specs]) in document order; spans removed after collection
 
@@ -741,6 +775,8 @@ def _guard_streamed_tool_calls(raw_lines: list[bytes], body: dict) -> bytes | No
                 for key in ("name", "arguments"):
                     target["function"][key] += (call.get("function") or {}).get(key) or ""
     stream_changed = False
+    content_changed = False
+    recovered_markup = False
     for index, call in list(calls.items()):
         fn = call["function"]
         if not fn["name"] and fn["arguments"].strip() in ("", "{}"):
@@ -769,18 +805,25 @@ def _guard_streamed_tool_calls(raw_lines: list[bytes], body: dict) -> bytes | No
             finish = "tool_calls"
             recovered_markup = True
         else:
-            clean, recovered = _repair_textual_tool_calls("".join(text), body)
-            if not recovered:
+            original_text = "".join(text)
+            clean, recovered = _repair_textual_tool_calls(original_text, body)
+            if recovered:
+                text = [clean]
+                calls = dict(enumerate(recovered))
+                finish = "tool_calls"
+                recovered_markup = True
+            elif clean != original_text:
+                # A pseudo-tool such as `table` was rendered as user-visible text.
+                text = [clean]
+                content_changed = True
+            else:
                 return None
-            text = [clean]
-            calls = dict(enumerate(recovered))
-            finish = "tool_calls"
-            recovered_markup = True
     else:
         recovered_markup = False
     choice = {"index": 0, "delta": {"content": "".join(text), "tool_calls": list(calls.values())},
               "finish_reason": finish}
-    if not _repair_tool_arguments({"choices": [choice]}, body) and not recovered_markup and not stream_changed:
+    if (not _repair_tool_arguments({"choices": [choice]}, body)
+            and not recovered_markup and not stream_changed and not content_changed):
         return None
     for index, call in enumerate(choice["delta"].get("tool_calls") or []):
         call.setdefault("index", index)
