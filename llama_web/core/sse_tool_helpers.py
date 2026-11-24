@@ -149,6 +149,28 @@ def _repair_textual_tool_calls(text: str, body: dict) -> tuple[str, list[dict]]:
             return only
         return None
 
+    # Some local GGUF chat templates leak a bare JSON tool array as ordinary content,
+    # optionally followed by a native end-of-turn marker. Accept it only when the whole
+    # remaining reply parses as tool calls for names offered in this request.
+    bare = re.sub(r"</?(?:end_of_turn|im_end|think|tool_call)>?", "", (text or "")).strip()
+    if bare.startswith(("[", "{")):
+        try:
+            value = json.loads(bare)
+        except (TypeError, ValueError):
+            value = None
+        candidates = value if isinstance(value, list) else ([value] if isinstance(value, dict) else [])
+        specs = [spec_from_value(item) for item in candidates]
+        if specs and all(specs) and len(specs) == len(candidates):
+            calls = []
+            for name, arguments in specs:
+                arguments = _restore_schema_types(arguments, schemas.get(name, {}))
+                calls.append({
+                    "id": f"call_repaired_{len(calls) + 1}",
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments, separators=(",", ":"))},
+                })
+            return "", calls
+
     entries = []  # (span, [specs]) in document order; spans removed after collection
 
     for match in _GEMMA_TOOL_RE.finditer(text or ''):
