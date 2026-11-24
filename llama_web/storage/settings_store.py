@@ -23,7 +23,6 @@ _LEGACY_ENV_SETTINGS = {
     'VLLM_BASE_URL': 'vllm_base_url', 'VLLM_API_KEY': 'vllm_api_key',
     'KOBOLD_BASE_URL': 'kobold_base_url', 'KOBOLD_API_KEY': 'kobold_api_key',
     'Q38ROCM_BASE_URL': 'q38rocm_base_url', 'Q38ROCM_API_KEY': 'q38rocm_api_key',
-    'FASTFLOWLM_BASE_URL': 'fastflowlm_base_url', 'FASTFLOWLM_API_KEY': 'fastflowlm_api_key',
     'OPENCODE_API_BASE_URL': 'opencode_api_base_url', 'OPENCODE_API_KEY': 'opencode_api_key',
 }
 _SECRET_KEYS = {key for key in _LEGACY_ENV_SETTINGS.values() if key.endswith('_api_key')}

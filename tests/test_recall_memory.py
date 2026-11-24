@@ -151,7 +151,7 @@ class MemoryInjectionPlacementTests(unittest.TestCase):
         self.stack.enter_context(patch.object(app.users_store, "get_user_by_id", side_effect=lambda uid: {
             "id": uid, "username": uid, "role": "admin",
         }))
-        for backend in [app.lemonade, app.vllm, app.kobold, app.fastflowlm, app.q38rocm, app.zen]:
+        for backend in [app.lemonade, app.vllm, app.kobold, app.q38rocm, app.zen]:
             self.stack.enter_context(patch.object(backend, "owns_model", return_value=False))
         self.recall_memory = app._recall_memory
         self.remember_exchange = app._remember_exchange

@@ -45,7 +45,7 @@
     filter.className = "download-tool-filters";
     filter.innerHTML = '<strong>Tool calling filters:</strong>' +
       '<label><input data-exclude-unknown-tools type="checkbox" /> Exclude unknown support</label>' +
-      [['lemonade','Lemonade'],['vllm','vLLM'],['lmstudio','LM Studio'],['kobold','KoboldCPP'],['fastflowlm','FastFlowLM']]
+      [['lemonade','Lemonade'],['vllm','vLLM'],['lmstudio','LM Studio'],['kobold','KoboldCPP'],['opencode','opencode.ai']]
         .map(([key,label]) => `<label><input data-tools-backend="${key}" type="checkbox" /> ${label}</label>`).join("") +
       '<strong>Model size:</strong>' +
       [['small','Small (up to 4B)'],['medium','Medium (over 4B to 13B)'],['large','Large (over 13B)']]
@@ -250,9 +250,9 @@
     browseHint: "Search Hugging Face for a GGUF model to download.",
   });
   const searchFastflow = (q) => searchBackend(q, {
-    backend: "fastflowlm", container: npuResultsEl, input: npuSearchInput,
+    backend: "opencode", container: npuResultsEl, input: npuSearchInput,
     onDownload: (id, _src, btn, sizeGb) => downloadStructuredCard(
-      id, "fastflowlm", btn, () => searchFastflow(npuSearchInput.value.trim()), sizeGb,
+      id, "opencode", btn, () => searchFastflow(npuSearchInput.value.trim()), sizeGb,
     ),
     browseHint: "Search Hugging Face for a GGUF model to download.",
   });

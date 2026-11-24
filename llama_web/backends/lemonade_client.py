@@ -39,7 +39,7 @@ from llama_web.models import model_test_profiles
 
 from llama_web.storage import settings_store
 from llama_web.backends import q38rocm_client
-from llama_web.backends import flm_context, lemonade_templates
+from llama_web.backends import lemonade_templates
 from llama_web.backends import lemonade_thinking
 from llama_web.storage import model_metadata_store
 
@@ -215,7 +215,6 @@ def _flm_footprint_map() -> dict[str, float]:
     global _flm_footprint_cache
     if _flm_footprint_cache is None:
         try:
-            from llama_web.backends import fastflowlm_client as _flm
             _flm_footprint_cache = {
                 c["id"]: c["size_gb"] for c in _flm.search_catalog("") if c.get("size_gb") is not None
             }
@@ -754,7 +753,7 @@ def load_model(model_key: str, context_length: int | None = None, **_ignored) ->
     # load on memory-constrained systems. Users can increase via the Models page.
     if not context_length:
         context_length = 4096
-    payload["ctx_size"] = flm_context.lemonade_load_context(model_key, context_length)
+    payload["ctx_size"] = context_length
 
     # A cold load of a large MoE GGUF (or Lemonade mid-evicting a previous model) can return a
     # transient 500 even though the model is fine and the very next attempt succeeds — confirmed

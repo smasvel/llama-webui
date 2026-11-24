@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote, urlsplit
 
 import requests
-from llama_web.backends import flm_context
 
 AGENT = 'llama_web-worker'
 SYSTEM = '''You are llama_web's persistent project agent. Work toward the assigned goal until
@@ -92,12 +91,12 @@ class OpenCode:
         return response.json() if response.content else {}
 
     def models(self):
-        local = {'fastflowlm', 'lemonade', 'lmstudio', 'vllm', 'kobold', 'q38rocm', 'opencode'}
+        local = {'llamacpp', 'lemonade', 'lmstudio', 'vllm', 'kobold', 'q38rocm', 'opencode'}
         models = []
         for x in self.call('GET', '/api/model')['data']:
             if x.get('providerID') not in local:
                 continue
-            context = flm_context.context_limit(x['id']) if x['providerID'] == 'fastflowlm' else (x.get('limit') or {}).get('context')
+            context = (x.get('limit') or {}).get('context')
             usable = not isinstance(context, int) or context >= 16384
             models.append({'providerID': x['providerID'], 'id': x['id'], 'name': x.get('name', x['id']),
                 'context': context, 'usable': usable,

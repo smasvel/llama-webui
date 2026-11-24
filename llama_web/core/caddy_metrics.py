@@ -23,7 +23,7 @@ LOG_PATH = "/var/log/caddy/access.jsonl"
 
 _PORT_BACKEND = {
     "8443": "lmstudio", "8444": "lemonade", "8445": "vllm",
-    "8446": "kobold", "8447": "fastflowlm",
+    "8446": "kobold",
 }
 _started = False
 _model_hint_cache: dict[str, tuple[float, str | None]] = {}
@@ -136,12 +136,9 @@ def _handle(entry: dict) -> None:
         status=entry.get("status"),
         client_ip=req.get("remote_ip") or req.get("client_ip"),
         user_id=None,
-        # fastflowlm is NPU-only regardless of which model was requested, so this can be
-        # answered with confidence despite never seeing the request body. lemonade multiplexes
-        # several recipes and only some of its models are actually NPU (flm-recipe) ones - with
-        # no model id visible at this layer, that one stays NULL/unknown rather than a guessed
-        # True or False (see metrics_store.py's _MIGRATION_COLUMNS comment).
-        is_npu=True if backend == "fastflowlm" else None,
+        # Without a model id at this layer, NPU status stays unknown (see
+        # metrics_store.py's _MIGRATION_COLUMNS comment).
+        is_npu=None,
     )
 
 

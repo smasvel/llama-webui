@@ -28,8 +28,7 @@ class VoiceTranscriptionRouteTests(unittest.TestCase):
 
     def test_manual_and_hands_free_route_uses_lemonade_whisper(self):
         audio = io.BytesIO(b"sample audio")
-        with patch.object(app.lemonade, "transcribe_audio", return_value="hello llama_web") as whisper, \
-             patch.object(app.fastflowlm, "transcribe_audio", side_effect=AssertionError("wrong transcription backend")):
+        with patch.object(app.lemonade, "transcribe_audio", return_value="hello llama_web") as whisper:
             response = self.client.post(
                 "/api/voice/transcribe",
                 data={"audio": (audio, "recording.webm")},

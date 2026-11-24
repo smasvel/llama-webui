@@ -15,7 +15,7 @@ class BackendBrokerTests(unittest.TestCase):
         )
         self.broker = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.broker)
-        self.broker._ALLOWED_UNITS = frozenset({"vllm.service", "kobold.service", "flm.service"})
+        self.broker._ALLOWED_UNITS = frozenset({"vllm.service", "kobold.service", "llama-web-engine.service"})
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), self.broker._Handler)
         self.url = f"http://127.0.0.1:{self.httpd.server_port}"
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
@@ -67,24 +67,6 @@ class BackendBrokerTests(unittest.TestCase):
                 self.broker.run_systemctl(["kill"], "vllm.service")
             with self.assertRaises(self.broker.BrokerError):
                 self.broker.run_systemctl(["restart"], "not-a-llama_web.service")
-
-    def test_rejects_unsupported_flm_verb(self):
-        with patch.dict(os.environ, {"LLAMA_WEB_BACKEND_BROKER_TOKEN": "token"}):
-            with self.assertRaises(self.broker.BrokerError):
-                self.broker.run_flm(["serve", "qwen3:0.6b"])
-            with self.assertRaises(self.broker.BrokerError):
-                self.broker.run_flm(["list", "--bad"])
-
-    def test_flm_version_is_allowed_when_binary_is_configured(self):
-        # Dot `flm --version` is read-only; the broker refuses to start serving.
-        with patch.dict(os.environ, {
-            "LLAMA_WEB_BACKEND_BROKER_TOKEN": "token",
-            "LLAMA_WEB_BACKEND_BROKER_FLM_BIN": "/bin/true",
-        }):
-            result = self.broker.run_flm(["--version"])
-            self.assertEqual(result["returncode"], 0)
-            with self.assertRaises(self.broker.BrokerError):
-                self.broker.run_flm(["serve", "x"])
 
 
 class BackendBrokerClientTests(unittest.TestCase):

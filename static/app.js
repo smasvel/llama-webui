@@ -5,7 +5,6 @@
     lemonade: "Ryzen AI (NPU)",
     vllm: "vLLM",
     kobold: "KoboldCPP",
-    fastflowlm: "FastFlowLM",
     opencode: "opencode.ai",
   };
   const modelListEl = document.getElementById("model-list");

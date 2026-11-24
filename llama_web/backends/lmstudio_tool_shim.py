@@ -10,7 +10,7 @@ from llama_web.core import model_stream_cancel
 from llama_web.models import model_test_profiles
 from flask import Flask, Response, request, stream_with_context
 
-from llama_web.backends.flm_tool_shim import (
+from llama_web.core.sse_tool_helpers import (
     _inject_tools_block,
     _repair_streamed_textual_tool_calls,
     _repair_textual_tool_calls,

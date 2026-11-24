@@ -21,7 +21,6 @@ BACKENDS = {
     "kobold": ("KoboldCPP", "http://127.0.0.1:5001", {"Windows", "Darwin", "Linux"}),
     "vllm": ("vLLM API server", "http://localhost:8000", {"Windows", "Darwin", "Linux"}),
     "lemonade": ("Lemonade Server", "http://localhost:13305", {"Linux"}),
-    "fastflowlm": ("FastFlowLM (AMD Ryzen AI NPU)", "http://127.0.0.1:52625", {"Linux"}),
 }
 
 

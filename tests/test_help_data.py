@@ -91,14 +91,6 @@ class TailscaleHelpTests(unittest.TestCase):
         self.assertEqual(cfg['compaction'],
                          {'auto': True, 'keep': {'tokens': 59051}, 'buffer': 16384})
 
-    @patch.object(help_data.flm_context, "context_limit", side_effect=lambda model=None: 262144 if model and "minicpm" in model else 8192)
-    def test_continue_uses_model_specific_flm_limits(self, _limit):
-        result = help_data.build_continue_yaml("203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
-            {"fastflowlm": ["flm/minicpm-v-4.7:1b", "flm/qwen3.8-mtp:27b"]}, [], network_label="Tailscale")
-        mini, qwen = result.split("  - name: ")[1:3]
-        self.assertIn("contextLength: 262144", mini)
-        self.assertIn("contextLength: 8192", qwen)
-
     def test_continue_uses_saved_context_over_backend_default(self):
         result = help_data.build_continue_yaml(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,

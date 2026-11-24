@@ -1,6 +1,6 @@
 """Tiny reverse-proxy shim between Caddy's :8443 LAN endpoint and LM Studio's own server
 (127.0.0.1:1234) — reports live streaming activity into the metrics page's live-activity feed,
-the same way lemonade_guard_shim.py/flm_tool_shim.py do for Lemonade/FastFlowLM traffic.
+the same way lemonade_guard_shim.py does for Lemonade traffic.
 
 Real gap this closes (2026-08-23): api_metrics_live()'s own docstring in app.py documents that
 LM Studio/vLLM/KoboldCPP LAN traffic "still can't appear here — no shim sits inline for those,
@@ -17,7 +17,7 @@ tool-call fragments stay buffered until validation completes. No NPU eviction oc
 Runs as its own systemd --user unit (lmstudio-shim.service) on 127.0.0.1:13307. Caddy's :8443
 block points its `reverse_proxy` here instead of LM Studio's raw 1234 so LAN clients get live
 reporting; this app's own lmstudio_client.py talks to LM Studio directly on 1234 and is
-unaffected either way — same relationship fastflowlm_client.py has with flm_tool_shim.py.
+unaffected either way — same relationship the other backend shims have.
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from llama_web.compat import question_tool_compat
 from llama_web.compat import exact_file_content
 from llama_web.compat import tool_argument_json
 from llama_web.compat import exact_tool_contract
-from llama_web.backends.flm_tool_shim import (
+from llama_web.core.sse_tool_helpers import (
     _live_content_event, _remove_streamed_content_prefix, _repair_textual_tool_calls,
     _repair_streamed_textual_tool_calls, _streamable_text_prefix,
 )

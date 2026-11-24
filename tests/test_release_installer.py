@@ -15,11 +15,6 @@ class ReleaseInstallerBackendTests(unittest.TestCase):
             {"lmstudio", "kobold", "vllm"},
         )
 
-    def test_linux_can_select_npu_backend(self):
-        answers = iter(["5", "http://127.0.0.1:52625"])
-        with patch("builtins.print"):
-            selected = choose_backend("Linux", lambda _prompt: next(answers))
-        self.assertEqual(selected, ("fastflowlm", "http://127.0.0.1:52625"))
 
     def test_macos_does_not_offer_linux_only_runtime(self):
         answers = iter(["1", ""])

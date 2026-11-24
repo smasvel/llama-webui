@@ -1,10 +1,10 @@
+from llama_web.core import sse_tool_helpers as shim
 import json
 import unittest
 from unittest.mock import Mock
 
-from llama_web.backends import flm_tool_shim as shim
 from llama_web.compat import tool_argument_json
-from tools.test_flm_model import decode
+from tests.sse_helpers import decode
 from tools.opencode_scenarios import TOOLS
 
 

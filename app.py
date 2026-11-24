@@ -40,7 +40,6 @@ from llama_web.agents import agent_container
 from llama_web.models import model_tests
 from llama_web.models import model_test_profiles
 from llama_web.compat import question_tool_compat
-from llama_web.backends import flm_context
 from llama_web.content import dmv_questions
 from llama_web.core import help_data
 from llama_web.storage import metrics_store
@@ -49,7 +48,6 @@ from llama_web.core import caddy_metrics
 from llama_web.content import quiz_content
 from llama_web.core import session_cookie
 from llama_web.storage import quiz_store
-from llama_web.backends import flm_conversion
 from llama_web.backends import media_intent
 from llama_web.backends import video_generation
 from llama_web.backends import lemonade_client as lemonade
@@ -65,7 +63,6 @@ _OPENCODE_DEFAULT_BASE_URLS = {
 }
 from llama_web.backends import kobold_client as kobold
 from llama_web.backends import q38rocm_client as q38rocm
-from llama_web.backends import fastflowlm_client as fastflowlm
 from llama_web.integrations import mcp_tools_client
 from llama_web.storage import memory_store
 from llama_web.core import npu_request_lock
@@ -112,7 +109,6 @@ try:
         "vLLM": lambda: vllm._systemctl("is-active").strip() == "active" if hasattr(vllm, "_systemctl") else False,
         "KoboldCPP": lambda: kobold._systemctl("is-active").strip() == "active" if hasattr(kobold, "_systemctl") else False,
         "q38rocm": lambda: q38rocm._systemctl("is-active").strip() == "active" if hasattr(q38rocm, "_systemctl") else False,
-        "FastFlowLM": lambda: fastflowlm._systemctl("is-active").strip() == "active" if hasattr(fastflowlm, "_systemctl") else False,
     }
     for svc, check in _backend_checks.items():
         try:
@@ -602,8 +598,6 @@ def _download_worker_structured(key: str, model_id: str, backend: str, source: s
             puller = vllm.download_model
         elif backend == "kobold":
             puller = kobold.download_model
-        elif backend == "fastflowlm":
-            puller = fastflowlm.download_model
         elif backend == "q38rocm":
             puller = lambda mid: q38rocm.download_model(
                 mid, cancelled=lambda: _download_cancelled(key),
@@ -625,7 +619,7 @@ def _download_worker_structured(key: str, model_id: str, backend: str, source: s
                 except Exception as exc:
                     print(f"[downloads] Could not clear deleted state for {model_id}: {exc}", flush=True)
     except (lemonade.LemonadeError, vllm.VLLMError, kobold.KoboldError,
-            fastflowlm.FastFlowLMError, q38rocm.Q38RocmError) as exc:
+            q38rocm.Q38RocmError) as exc:
         _set_download_progress(key, error=str(exc))
 
 
@@ -1641,7 +1635,6 @@ def api_restart_backends():
         "vLLM": lambda: vllm._systemctl("restart", timeout=120),
         "KoboldCPP": lambda: kobold._systemctl("restart", timeout=120),
         "q38rocm": restart_q38_if_running,
-        "FastFlowLM": lambda: fastflowlm._systemctl("restart", timeout=120),
     }
     services = {k: v for k, v in all_services.items() if k in selected}
 
@@ -1651,7 +1644,7 @@ def api_restart_backends():
         try:
             models = []
             try:
-                models = lms.list_models() + lemonade.list_models() + vllm.list_models() + kobold.list_models() + fastflowlm.list_models() + q38rocm.list_models()
+                models = lms.list_models() + lemonade.list_models() + vllm.list_models() + kobold.list_models() + q38rocm.list_models()
             except Exception:
                 pass
             for m in models:
@@ -1707,7 +1700,6 @@ def api_start_backend():
         "vLLM": lambda: vllm._systemctl("start", timeout=120),
         "KoboldCPP": lambda: kobold._systemctl("start", timeout=120),
         "q38rocm": lambda: q38rocm._systemctl("start", timeout=120),
-        "FastFlowLM": lambda: fastflowlm._systemctl("start", timeout=120),
     }
     if name not in _BACKEND_START:
         return jsonify({"error": f"Unknown or unsupported backend: {name}"}), 400
@@ -1730,7 +1722,6 @@ def api_stop_backend():
         "vLLM": lambda: vllm._systemctl("stop", timeout=120),
         "KoboldCPP": lambda: kobold._systemctl("stop", timeout=120),
         "q38rocm": lambda: q38rocm._systemctl("stop", timeout=120),
-        "FastFlowLM": lambda: fastflowlm._systemctl("stop", timeout=120),
         "Lemonade": lambda: subprocess.run(["systemctl", "--user", "stop", "lemonade-guard-shim.service"], check=True, capture_output=True, text=True, timeout=120),
     }
     if name not in _BACKEND_STOP:
@@ -1850,62 +1841,6 @@ def api_restart_engine():
 @admin_required
 def downloads_page():
     return render_template("downloads.html", username=session.get("username"))
-
-
-@app.get("/flm-converter")
-@admin_required
-def flm_converter_page():
-    return render_template("flm_converter.html", username=session.get("username"))
-
-
-@app.get("/api/flm-converter")
-@admin_required
-def api_flm_converter():
-    return jsonify({
-        "converter": flm_conversion.availability(),
-        "backend": fastflowlm.backend_status(),
-        "models": flm_conversion.discover_models(),
-        "jobs": flm_conversion.list_jobs(owner_id=session["user_id"]),
-    })
-
-
-@app.post("/api/flm-converter/validate")
-@admin_required
-def api_flm_converter_validate():
-    try:
-        return jsonify(flm_conversion.validate_model((request.get_json(silent=True) or {}).get("path", "")))
-    except flm_conversion.ConversionError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-
-@app.post("/api/flm-converter/jobs")
-@admin_required
-def api_flm_converter_start():
-    body = request.get_json(silent=True) or {}
-    try:
-        job = flm_conversion.start_job(
-            body.get("path", ""), body.get("name", ""),
-            body.get("acknowledge_unrunnable") is True, owner_id=session["user_id"],
-        )
-        return jsonify(job), 202
-    except flm_conversion.ConversionError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-
-@app.get("/api/flm-converter/jobs/<job_id>")
-@admin_required
-def api_flm_converter_job(job_id):
-    job = flm_conversion.get_job(job_id, owner_id=session["user_id"])
-    return jsonify(job) if job else (jsonify({"error": "Conversion job not found."}), 404)
-
-
-@app.post("/api/flm-converter/jobs/<job_id>/cancel")
-@admin_required
-def api_flm_converter_cancel(job_id):
-    try:
-        return jsonify(flm_conversion.cancel_job(job_id, owner_id=session["user_id"]))
-    except flm_conversion.ConversionError as exc:
-        return jsonify({"error": str(exc)}), 404
 
 
 @app.get("/browse-history")
@@ -2152,7 +2087,7 @@ def _require_localhost():
     """Gate for the internal /api/internal/live/* routes below: only the LAN-facing shims
     (same machine, no exception) may report into the live-activity registry. Not admin_required
     - the shims are unauthenticated localhost processes with no session/login of their own,
-    same trust boundary lemonade_guard_shim.py/flm_tool_shim.py already sit inside of."""
+    same trust boundary the local backend shims already sit inside of."""
     if request.remote_addr not in ("127.0.0.1", "::1"):
         return jsonify({"error": "forbidden"}), 403
     return None
@@ -2304,11 +2239,9 @@ def _collect_completion(messages: list[dict], model: str, temperature: float = 0
         backend = zen
     elif kobold.owns_model(model):
         backend = kobold
-    elif fastflowlm.owns_model(model):
-        backend = fastflowlm
     else:
         backend = lms
-    is_npu = backend is fastflowlm or (backend is lemonade and lemonade.is_npu_model(model))
+    is_npu = backend is lemonade and lemonade.is_npu_model(model)
     npu_handle = _claim_selected_npu(backend, model) if is_npu else None
     parts: list[str] = []
     try:
@@ -2471,9 +2404,6 @@ def api_list_models():
             model["context_window_source"] = "loaded_runtime"
         elif configured_context:
             model["context_window_tokens"] = configured_context
-            model["context_window_source"] = "configured"
-        elif model.get("backend") == "fastflowlm":
-            model["context_window_tokens"] = flm_context.context_limit(model.get("id"))
             model["context_window_source"] = "configured"
         else:
             model["context_window_tokens"] = help_data._CTX.get(model.get("backend"), 8192)
@@ -2774,7 +2704,7 @@ def _test_loaded_reasoning_models():
     metadata cannot fail an otherwise successful handoff.
     """
     clients = (("llamacpp", llamacpp), ("lmstudio", lms), ("lemonade", lemonade),
-               ("vllm", vllm), ("kobold", kobold), ("fastflowlm", fastflowlm))
+               ("vllm", vllm), ("kobold", kobold))
     loaded = []
     for backend, client in clients:
         for model in client.list_models():
@@ -2811,18 +2741,16 @@ def _normalize_question_tool_calls(tool_calls, offered_tools, messages):
 
 def _test_connection(target):
     backend = target['backend']
-    client = {'llamacpp': llamacpp, 'fastflowlm': fastflowlm, 'lmstudio': lms,
+    client = {'llamacpp': llamacpp, 'lmstudio': lms,
               'lemonade': lemonade, 'vllm': vllm, 'kobold': kobold, 'opencode': zen}[backend]
     base = client.base_url().rstrip('/')
     local = urlsplit(base)
-    proxy_ports = {'fastflowlm': (52625, 52626), 'lmstudio': (1234, 13307), 'lemonade': (13305, 13306)}
+    proxy_ports = {'lmstudio': (1234, 13307), 'lemonade': (13305, 13306)}
     if backend in proxy_ports and local.hostname in ('127.0.0.1', 'localhost', '::1') and local.port == proxy_ports[backend][0]:
         base = 'http://127.0.0.1:' + str(proxy_ports[backend][1])
     model = target['id']
     if backend == 'llamacpp':
         model = llamacpp.request_model_id()
-    elif backend == 'fastflowlm':
-        model = fastflowlm.resolve_model(model)
     elif backend == 'kobold':
         # Exercise llama_web's Kobold tool-compatibility bridge during live model
         # checks so the report reflects the endpoint llama_web chat actually uses.
@@ -2846,8 +2774,6 @@ def _test_connection(target):
 
 
 def _test_context(target):
-    if target['backend'] == 'fastflowlm':
-        return flm_context.context_limit(target['id'])
     client = {'lmstudio': lms, 'lemonade': lemonade, 'vllm': vllm,
               'kobold': kobold, 'opencode': zen}[target['backend']]
     for model in client.list_models():
@@ -2864,18 +2790,6 @@ def _prepare_agent_model(job):
         if model['providerID'] == 'opencode':
             _test_load_model({'backend': 'opencode', 'id': model['id']})
             return
-        # Continuing with an already-serving FastFlowLM model is not a new model
-        # load. Avoid a needless eviction/reload (and dependence on unrelated
-        # backend availability).
-        if (model['providerID'] == 'fastflowlm' and not fastflowlm.requests_paused()
-                and fastflowlm.current_served_model() == model['id']):
-            try:
-                response = requests.get(fastflowlm.base_url()+'/v1/models',
-                                        headers=fastflowlm._auth_headers(), timeout=3)
-                response.raise_for_status()
-                return
-            except requests.RequestException:
-                pass
         # _test_load_model unloads every active reasoning model before loading its
         # target. For an agent continuing with a healthy model, that eviction is
         # unnecessary and can strand the task if a backend's unload call stalls.
@@ -4035,7 +3949,7 @@ def api_model_test_scenario_assistant():
         return jsonify({'error': 'Wait for model tests and assigned agents to finish before chatting with the scenario assistant.'}), 409
     body = request.get_json(silent=True) or {}
     backend, model_id = body.get('backend'), body.get('model')
-    if backend not in ('fastflowlm', 'lmstudio', 'lemonade', 'vllm', 'kobold', 'q38rocm', 'opencode') or not isinstance(model_id, str):
+    if backend not in ('lmstudio', 'lemonade', 'vllm', 'kobold', 'q38rocm', 'opencode') or not isinstance(model_id, str):
         return jsonify({'error': 'Choose a supported installed chat model for the scenario assistant.'}), 400
     messages = body.get('messages')
     if not isinstance(messages, list) or not 1 <= len(messages) <= 16:
@@ -4142,7 +4056,7 @@ def api_model_tests_start():
         model = inventory.get(pair)
         if (not model or pair in seen or model.get('type') in _SUPPORT_MODEL_TYPES
                 or model.get('loadable') is False
-                or pair[0] not in ('fastflowlm', 'lmstudio', 'lemonade', 'vllm', 'kobold', 'q38rocm')):
+                or pair[0] not in ('lmstudio', 'lemonade', 'vllm', 'kobold', 'q38rocm')):
             return jsonify({'error': 'Choose unique, installed, loadable chat models.'}), 400
         seen.add(pair)
         targets.append({'backend': pair[0], 'id': pair[1]})
@@ -4214,15 +4128,7 @@ def api_model_tests_reset_profile():
 
 
 def _free_npu_except(keep: str, *, npu_lock_held: bool = False) -> None:
-    """FastFlowLM and Lemonade both drive the one NPU and can't hold it at once. Before
-    activating one, release the other: `keep` is the backend about to use the NPU."""
-    if keep != "fastflowlm":
-        try:
-            fastflowlm.unload_model(
-                npu_lock_held=npu_lock_held
-            )  # stop flm.service, freeing the NPU
-        except Exception:
-            pass
+    """Release NPU-backed models from other backends before activating one."""
     if keep != "lemonade":
         try:
             for m in lemonade.list_models():
@@ -4257,7 +4163,6 @@ def _unload_reasoning_models_before_load(requested: str, *, npu_lock_held: bool 
         ("Lemonade", lemonade.list_models, lemonade.unload_model),
         ("vLLM", vllm.list_models, vllm.unload_model),
         ("KoboldCPP", kobold.list_models, kobold.unload_model),
-        ("FastFlowLM", fastflowlm.list_models, fastflowlm.unload_model),
     )
     inventories = []
     for label, list_models, unload_model in backends:
@@ -4331,8 +4236,6 @@ def _model_load_size_gb(requested: str) -> float | None:
     try:
         if llamacpp.owns_model(requested):
             models = llamacpp.list_models()
-        elif fastflowlm.owns_model(requested):
-            models = fastflowlm.list_models()
         elif vllm.owns_model(requested):
             models = vllm.list_models()
         elif kobold.owns_model(requested):
@@ -4351,22 +4254,9 @@ def _model_load_size_gb(requested: str) -> float | None:
 def _claim_selected_npu(backend, model: str):
     """Give the selected backend exclusive NPU ownership for the complete response."""
     # This path is used by chat, quizzes and startup as well as the explicit Load API.
-    # Preflight before acquiring the machine-wide lock or stopping another NPU backend;
-    # a blocked local engine profile must be side-effect free everywhere.
-    if backend is fastflowlm:
-        fastflowlm.check_loadable(model)
     handle = npu_request_lock.acquire()
     try:
-        if backend is fastflowlm:
-            _free_npu_except("fastflowlm", npu_lock_held=True)
-            active = (fastflowlm.current_served_model() or "").removeprefix("flm/")
-            if active != fastflowlm.resolve_model(model):
-                # FastFlowLM otherwise switches weights lazily on the next request.
-                # Make that implicit traffic-driven load obey the same unload-first
-                # rule as an explicit Models-page load.
-                fastflowlm.unload_model(npu_lock_held=True)
-            fastflowlm.load_model(model)
-        elif backend is lemonade:
+        if backend is lemonade:
             _free_npu_except("lemonade", npu_lock_held=True)
             loaded_entry = next((m for m in lemonade.list_models()
                                  if m.get("id") == model and m.get("state") == "loaded"), None)
@@ -4404,7 +4294,7 @@ def _track_model_load_status(view):
         if not isinstance(model_id, str) or not model_id:
             return view(*args, **kwargs)
         backend = next((name for name, client in (
-            ("opencode", zen), ("fastflowlm", fastflowlm), ("vllm", vllm),
+            ("opencode", zen), ("vllm", vllm),
             ("kobold", kobold), ("lemonade", lemonade),
         ) if client.owns_model(model_id)), None)
         if backend is None:
@@ -4436,7 +4326,7 @@ def _track_model_load_status(view):
                         print(f"[models] Could not record load event for {model_id}: {exc}", flush=True)
                     # Update service status to reflect that the backend is running
                     _svc_name = {"lemonade": "Lemonade", "lmstudio": "LM Studio", "vllm": "vLLM",
-                                 "kobold": "KoboldCPP", "fastflowlm": "FastFlowLM"}.get(backend, backend)
+                                 "kobold": "KoboldCPP"}.get(backend, backend)
                     try:
                         model_metadata_store.record_service_status(_svc_name, "started", detail=f"Model {model_id} loaded")
                     except Exception:
@@ -4497,32 +4387,6 @@ def api_load_model():
             llamacpp.load_model(model_key, context_length=body.get("context_length"))
         except (llamacpp.LlamaCppError, RuntimeError) as exc:
             return jsonify({"error": str(exc)}), 502
-        return jsonify({"ok": True, "unloaded": unloaded})
-    if fastflowlm.owns_model(model_key):
-        # Reject incomplete engine-development profiles before unloading the working
-        # reasoning model. Once kernels/catalog registration exist, the ordinary
-        # single-model eviction and NPU handoff below applies unchanged.
-        try:
-            fastflowlm.check_loadable(model_key)
-        except fastflowlm.FastFlowLMError as exc:
-            return jsonify({"error": str(exc)}), 422
-        try:
-            npu_handle = npu_request_lock.acquire(timeout=15)
-        except TimeoutError as exc:
-            return jsonify({"error": str(exc)}), 409
-        try:
-            # Free the NPU from Lemonade first (mutually exclusive), then activate FLM.
-            _free_npu_except("fastflowlm", npu_lock_held=True)
-            unloaded = _unload_reasoning_models_before_load(model_key, npu_lock_held=True)
-            # Checked after eviction so the released memory counts.
-            refusal = resource_guard.check_available_memory(_model_load_size_gb(model_key))
-            if refusal:
-                return jsonify({"error": refusal}), 422
-            fastflowlm.load_model(model_key)
-        except (fastflowlm.FastFlowLMError, RuntimeError) as exc:
-            return jsonify({"error": str(exc)}), 502
-        finally:
-            npu_request_lock.release(npu_handle)
         return jsonify({"ok": True, "unloaded": unloaded})
     if vllm.owns_model(model_key):
         # Pre-flight checks before this ever reaches vllm.service — each guards a real
@@ -4719,12 +4583,6 @@ def api_unload_model():
         except kobold.KoboldError as exc:
             return jsonify({"error": str(exc)}), 502
         return jsonify({"ok": True})
-    if fastflowlm.owns_model(identifier):
-        try:
-            fastflowlm.unload_model(identifier)
-        except fastflowlm.FastFlowLMError as exc:
-            return jsonify({"error": str(exc)}), 502
-        return jsonify({"ok": True})
     if lemonade.owns_model(identifier):
         try:
             lemonade.unload_model(identifier)
@@ -4747,7 +4605,7 @@ def api_delete_model():
         return jsonify({"error": "'identifier' is required"}), 400
     backend = next((name for name, client in (
         ('llamacpp', llamacpp), ('opencode', zen), ('vllm', vllm), ('kobold', kobold),
-        ('fastflowlm', fastflowlm), ('lemonade', lemonade),
+        ('lemonade', lemonade),
     ) if client.owns_model(identifier)), 'lmstudio')
     if not getattr(_model_test_context, 'active', False):
         if any(
@@ -4789,12 +4647,6 @@ def api_delete_model():
         except kobold.KoboldError as exc:
             return jsonify({"error": str(exc)}), 502
         return jsonify({"ok": True})
-    if backend == 'fastflowlm':
-        try:
-            fastflowlm.delete_model(identifier)
-        except fastflowlm.FastFlowLMError as exc:
-            return jsonify({"error": str(exc)}), 502
-        return jsonify({"ok": True})
     if backend == 'lemonade':
         # Frees memory first, disk second — a loaded-but-deleted model would be a
         # confusing dangling state. Best-effort: fine if it was already unloaded.
@@ -4825,11 +4677,11 @@ def api_download_model():
     if body is None:
         return jsonify({"error": "Choose one model per download request."}), 400
     backend = body.get("backend") or "lmstudio"
-    if backend not in ("lmstudio", "lemonade", "vllm", "kobold", "fastflowlm", "q38rocm"):
-        return jsonify({"error": "'backend' must be 'lmstudio', 'lemonade', 'vllm', 'kobold', 'fastflowlm', or 'q38rocm'"}), 400
+    if backend not in ("lmstudio", "lemonade", "vllm", "kobold", "q38rocm"):
+        return jsonify({"error": "'backend' must be 'lmstudio', 'lemonade', 'vllm', 'kobold', or 'q38rocm'"}), 400
 
     key = f"{backend}:{query}"
-    if backend in ("vllm", "kobold", "fastflowlm", "q38rocm"):
+    if backend in ("vllm", "kobold", "q38rocm"):
         # Both yield structured byte-level progress dicts (kobold.download_model /
         # vllm.download_model) — routed through the same structured worker as Lemonade's
         # HF pulls, not the freeform text-line one.
@@ -4861,7 +4713,6 @@ _MODEL_BACKEND_INFO = {
     "lemonade": ("Ryzen AI / Lemonade", "GGUF or FLM", "CPU / GPU / NPU by recipe"),
     "vllm": ("vLLM", "Hugging Face weights", "CPU on this system"),
     "kobold": ("KoboldCPP", "GGUF", "CPU / Vulkan GPU"),
-    "fastflowlm": ("FastFlowLM", "FLM NPU", "AMD Ryzen AI NPU"),
     "q38rocm": ("q38rocm (local RADV Vulkan)", "GGUF (iMatrix NVFP4 MTP)", "AMD Radeon Vulkan GPU"),
 }
 
@@ -4914,8 +4765,6 @@ def _normalize_model_results(results: list[dict], backend: str) -> list[dict]:
             source_url = existing_url
         elif repo:
             source_url = f"https://huggingface.co/{repo}"
-        elif backend == "fastflowlm":
-            source_url = "https://github.com/FastFlowLM/FastFlowLM"
         else:
             # A result without a verifiable source is unsafe to present as downloadable.
             continue
@@ -4956,8 +4805,6 @@ def _search_models_for_backend(backend: str, query: str) -> list[dict]:
         results = lemonade.search_huggingface(query)
         lemonade.fill_result_sizes(results)
         return _normalize_model_results(results, backend)
-    if backend == "fastflowlm":
-        return _normalize_model_results(fastflowlm.search_catalog(query, limit=500 if not query else 80), backend)
     if backend == "q38rocm":
         return _normalize_model_results(q38rocm.search_catalog(query), backend)
     if backend == "lemonade":
@@ -5154,9 +5001,9 @@ def api_active_downloads():
     # (e.g. a CLI `flm pull --force` re-download) — it isn't in _active_downloads, so read
     # FLM's on-disk progress directly. Skipped if an app-initiated FLM download is already
     # tracked above, to avoid showing it twice.
-    if not any(d.get("backend") == "fastflowlm" for d in downloads):
+    if False:
         try:
-            ambient = fastflowlm.active_pull_progress()
+            ambient = None
         except Exception:
             ambient = None
         if ambient:
@@ -5214,7 +5061,7 @@ def api_cancel_download():
     body = request.get_json(silent=True) or {}
     backend = (body.get("backend") or "").strip()
     model_id = (body.get("model_id") or "").strip()
-    if backend not in ("lmstudio", "lemonade", "vllm", "kobold", "fastflowlm", "q38rocm") or not model_id:
+    if backend not in ("lmstudio", "lemonade", "vllm", "kobold", "q38rocm") or not model_id:
         return jsonify({"error": "A valid 'backend' and 'model_id' are required."}), 400
     key = f"{backend}:{model_id}"
     with _active_downloads_lock:
@@ -5226,7 +5073,6 @@ def api_cancel_download():
     signatures = {
         "lmstudio": ("lms", "get"),
         "vllm": ("hf", "download"),
-        "fastflowlm": ("flm", "pull"),
     }
     stop_requested = 0
     signature = signatures.get(backend)
@@ -5297,18 +5143,11 @@ def _read_caddy_info() -> dict | None:
             # Caddy's :8444 block now proxies to instead (see its module docstring) so LAN
             # clients can't trigger the NPU-collision OOM that used to hit flm.service - the
             # shim forwards everything else to 13305 unmodified, so either port means "this
-            # Caddy block is the lemonade one" (same dual-port pattern as fastflowlm below).
             ports["lemonade"] = caddy_port
         elif target_port == "8000":
             ports["vllm"] = caddy_port
         elif target_port == "5001":
             ports["kobold"] = caddy_port
-        elif target_port in ("52625", "52626"):
-            # 52625 = FastFlowLM's own server directly; 52626 = flm_tool_shim.py, which Caddy's
-            # :8447 block now proxies to instead (see its module docstring) so LAN clients like
-            # OpenCode get real tool_calls — the shim forwards everything else to 52625
-            # unmodified, so either port means "this Caddy block is the fastflowlm one."
-            ports["fastflowlm"] = caddy_port
     return {
         "bearer_token": token_match.group(1) if token_match else None,
         "ports": ports,
@@ -5318,11 +5157,9 @@ def _read_caddy_info() -> dict | None:
 # backend -> the local upstream port each Caddy block reverse-proxies to (see
 # /etc/caddy/Caddyfile) - the same 5 targets help_data.py's own port-parsing maps FROM, needed
 # here in the other direction to hand an admin a ready-to-paste line for each block. lemonade
-# points at lemonade_guard_shim.py (13306), not Lemonade's raw 13305, same reason fastflowlm
-# points at flm_tool_shim.py (52626) rather than FastFlowLM's raw 52625 - see either shim's
 # module docstring.
 _CADDY_UPSTREAM = {
-    "lmstudio": 1234, "lemonade": 13306, "vllm": 8000, "kobold": 5001, "fastflowlm": 52626,
+    "lmstudio": 1234, "lemonade": 13306, "vllm": 8000, "kobold": 5001,
 }
 
 
@@ -5483,13 +5320,6 @@ def _test_q38rocm(base_url: str, api_key: str | None) -> tuple[bool, str]:
     return True, f"Connected — serving: {', '.join(ids)}." if ids else "Connected — no model served."
 
 
-def _test_fastflowlm(base_url: str, api_key: str | None) -> tuple[bool, str]:
-    return _test_ondemand_openai(
-        base_url, api_key, "FastFlowLM",
-        "Load a FastFlowLM (Ryzen AI NPU) model from the Models page, then test again.",
-    )
-
-
 def _test_caddy(port: int, token: str, path: str, host: str = "localhost") -> tuple[bool, str]:
     # verify=False: same self-signed Caddy cert every curl -k test this session already
     # trusted manually — this app has no separate copy of the CA to verify against.
@@ -5588,12 +5418,7 @@ def api_test_settings():
             (body.get("base_url") or "").strip() or q38rocm.base_url(),
             body.get("api_key") or q38rocm.api_key(),
         )
-    elif target == "fastflowlm":
-        ok, message = _test_fastflowlm(
-            (body.get("base_url") or "").strip() or fastflowlm.base_url(),
-            body.get("api_key") or fastflowlm.api_key(),
-        )
-    elif target in ("caddy_lmstudio", "caddy_lemonade", "caddy_vllm", "caddy_kobold", "caddy_fastflowlm"):
+    elif target in ("caddy_lmstudio", "caddy_lemonade", "caddy_vllm", "caddy_kobold"):
         caddy = _read_caddy_info()
         if not caddy or not caddy.get("bearer_token"):
             return jsonify({"ok": False, "message": "Caddyfile not found/readable, or no bearer token in it."})
@@ -5604,7 +5429,7 @@ def api_test_settings():
         path = "/v1/health" if port_key == "lemonade" else "/v1/models"
         ok, message = _test_caddy(port, caddy["bearer_token"], path)
     elif target in (
-        "tailscale_lmstudio", "tailscale_lemonade", "tailscale_vllm", "tailscale_kobold", "tailscale_fastflowlm",
+        "tailscale_lmstudio", "tailscale_lemonade", "tailscale_vllm", "tailscale_kobold",
     ):
         ts_ip = _effective_tailscale_ip()
         if not ts_ip:
@@ -5665,8 +5490,6 @@ def _settings_snapshot() -> dict:
         "kobold_gpu_layers": settings_store.get("kobold_gpu_layers") or "",
         "kobold_draft_model": settings_store.get("kobold_draft_model") or "",
         "kobold_draft_amount": settings_store.get("kobold_draft_amount") or "",
-        "fastflowlm_base_url": fastflowlm.base_url(),
-        "fastflowlm_api_key": fastflowlm.api_key() or "",
         "lan_default_model": settings_store.get("lan_default_model") or "",
         # Admin-editable chat request limits (Settings panel) - see _chat_limits() for the
         # live-override/default behavior and _CHAT_LIMIT_BOUNDS for the accepted ranges.
@@ -5724,7 +5547,6 @@ def api_update_settings():
         "opencode_api_key", "opencode_api_base_url", "opencode_api_plan",
         "kobold_base_url", "kobold_api_key",
         "q38rocm_base_url", "q38rocm_api_key",
-        "fastflowlm_base_url", "fastflowlm_api_key",
         "lan_default_model", "tailscale_ip_override",
         "kobold_gpu_layers", "kobold_draft_model", "kobold_draft_amount",
     ):
@@ -6166,85 +5988,20 @@ def api_voice_transcribe():
 @app.post("/api/voice/translate")
 @login_required
 def api_voice_translate():
-    """Turn-based local speech translation using Gemma 4 E4B on the Ryzen AI NPU."""
-    audio_file = request.files.get("audio")
-    target_language = (request.form.get("target_language") or "English").strip()
-    if not audio_file:
-        return jsonify({"error": "'audio' file is required"}), 400
-    if target_language not in fastflowlm.VOICE_TRANSLATION_LANGUAGES:
-        return jsonify({"error": "unsupported target language"}), 400
-    audio_bytes = audio_file.read(15 * 1024 * 1024 + 1)
-    if not audio_bytes:
-        return jsonify({"error": "empty audio"}), 400
-    if len(audio_bytes) > 15 * 1024 * 1024:
-        return jsonify({"error": "audio recording exceeds the 15 MB limit"}), 413
-    try:
-        transcript = lemonade.transcribe_audio(
-            audio_bytes, filename=audio_file.filename or "translation.webm"
-        )
-        if not transcript:
-            return jsonify({"error": "no speech was recognized"}), 422
-        text = fastflowlm.translate_text(transcript, target_language)
-    except (lemonade.LemonadeError, fastflowlm.FastFlowLMError) as exc:
-        return jsonify({"error": str(exc)}), 502
-    return jsonify({"text": text, "transcript": transcript, "target_language": target_language,
-                    "model": "Gemma 4 E4B (Ryzen AI NPU)"})
+    """Translation is unavailable now that the FastFlowLM backend has been removed."""
+    return jsonify({"error": "Translation is unavailable: no local translation model is installed."}), 503
 
 
 @app.post("/api/image/translate")
 @login_required
 def api_image_translate():
-    """OCR + translate any text visible in an uploaded image, using Gemma 4 E4B's vision
-    input on the Ryzen AI NPU - same model as voice translation."""
-    image_file = request.files.get("image")
-    target_language = (request.form.get("target_language") or "English").strip()
-    if not image_file:
-        return jsonify({"error": "'image' file is required"}), 400
-    if target_language not in fastflowlm.VOICE_TRANSLATION_LANGUAGES:
-        return jsonify({"error": "unsupported target language"}), 400
-    image_bytes = image_file.read(15 * 1024 * 1024 + 1)
-    if not image_bytes:
-        return jsonify({"error": "empty image"}), 400
-    if len(image_bytes) > 15 * 1024 * 1024:
-        return jsonify({"error": "image exceeds the 15 MB limit"}), 413
-    mime_type = image_file.mimetype or "image/png"
-    try:
-        text = fastflowlm.translate_image_text(image_bytes, mime_type, target_language)
-    except fastflowlm.FastFlowLMError as exc:
-        return jsonify({"error": str(exc)}), 502
-    return jsonify({"text": text, "target_language": target_language,
-                    "model": "Gemma 4 E4B (Ryzen AI NPU)"})
+    return jsonify({"error": "Translation is unavailable: no local translation model is installed."}), 503
 
 
 @app.post("/api/video/translate")
 @login_required
 def api_video_translate():
-    """Translate a video's spoken audio track: extract audio (ffmpeg, any container),
-    transcribe it (Whisper via Lemonade), then translate the transcript with Gemma 4 E4B -
-    same text-translation pipeline /api/voice/translate uses, just fed from a video file
-    instead of a live mic recording."""
-    video_file = request.files.get("video")
-    target_language = (request.form.get("target_language") or "English").strip()
-    if not video_file:
-        return jsonify({"error": "'video' file is required"}), 400
-    if target_language not in fastflowlm.VOICE_TRANSLATION_LANGUAGES:
-        return jsonify({"error": "unsupported target language"}), 400
-    video_bytes = video_file.read(50 * 1024 * 1024 + 1)
-    if not video_bytes:
-        return jsonify({"error": "empty video"}), 400
-    if len(video_bytes) > 50 * 1024 * 1024:
-        return jsonify({"error": "video exceeds the 50 MB limit"}), 413
-    try:
-        transcript = lemonade.transcribe_audio(
-            video_bytes, filename=video_file.filename or "translation.mp4"
-        )
-        if not transcript:
-            return jsonify({"error": "no speech was recognized"}), 422
-        text = fastflowlm.translate_text(transcript, target_language)
-    except (lemonade.LemonadeError, fastflowlm.FastFlowLMError) as exc:
-        return jsonify({"error": str(exc)}), 502
-    return jsonify({"text": text, "transcript": transcript, "target_language": target_language,
-                    "model": "Gemma 4 E4B (Ryzen AI NPU)"})
+    return jsonify({"error": "Translation is unavailable: no local translation model is installed."}), 503
 
 
 @app.post("/api/voice/speak")
@@ -6852,8 +6609,6 @@ def api_chat():
         backend, backend_error, backend_name = zen, zen.OpenCodeError, "opencode"
     elif kobold.owns_model(model):
         backend, backend_error, backend_name = kobold, kobold.KoboldError, "kobold"
-    elif fastflowlm.owns_model(model):
-        backend, backend_error, backend_name = fastflowlm, fastflowlm.FastFlowLMError, "fastflowlm"
     else:
         backend, backend_error, backend_name = lms, lms.LMStudioError, "lmstudio"
 
@@ -6899,12 +6654,12 @@ def api_chat():
             tool_round_limited = False
             request_status = "done"
             start_time = time.monotonic()
-            # fastflowlm is NPU-only; lemonade multiplexes several recipes (llamacpp, flm,
-            # whispercpp, kokoro, ...) so only its flm-recipe models actually run on the NPU -
+            # Lemonade multiplexes several recipes (llamacpp, whispercpp, kokoro, ...)
+            # so only its NPU-recipe models actually run on the NPU -
             # see lemonade_client.is_npu_model()'s docstring for why this can't be guessed
             # from the model id (e.g. "...-Coder-NPU" in a name has turned out to still be a
             # plain llamacpp/GGUF model, not an NPU one, confirmed live 2026-07-26).
-            is_npu = backend is fastflowlm or (backend is lemonade and lemonade.is_npu_model(model))
+            is_npu = backend is lemonade and lemonade.is_npu_model(model)
             live_id = live_requests.start(
                 source="webui-chat", backend=backend_name, model=model,
                 max_tokens=max_tokens, is_npu=is_npu, owner_id=user_id,
@@ -7084,9 +6839,7 @@ def api_chat():
                             # arrives whole in the first chunk for a given tool call,
                             # `arguments` arrives piecemeal across many chunks and must
                             # be concatenated, same as any other OpenAI-shaped tool-call
-                            # stream (this is exactly what flm_tool_shim.py's own
-                            # degeneracy/repair logic reconstructs before ever showing
-                            # it to OpenCode - same accumulation, different consumer).
+                            # stream, so partial argument fragments must be joined here.
                             for tc_delta in delta_obj.get("tool_calls") or []:
                                 idx = tc_delta.get("index", 0)
                                 entry = round_tool_calls.setdefault(
@@ -7156,18 +6909,6 @@ def api_chat():
                             f"data: {json.dumps({'choices': [{'delta': {'content': marker}}]})}\n\n"
                         )
                         tool_result = mcp_tools_client.call_tool(tc_name, arguments)
-                        if backend is fastflowlm:
-                            result_limit = (
-                                mcp_tools_client.CHAT_BROWSER_INSPECTION_LIMIT
-                                if tc_name in {
-                                    "playwright__browser_navigate", "playwright__browser_navigate_back",
-                                    "playwright__browser_click", "playwright__browser_type",
-                                    "playwright__browser_fill_form", "playwright__browser_select_option",
-                                    "playwright__browser_wait_for", "playwright__browser_tabs",
-                                }
-                                else mcp_tools_client.CHAT_TOOL_RESULT_LIMIT
-                            )
-                            tool_result = mcp_tools_client.compact_chat_tool_result(tool_result, result_limit)
                         if browser_read:
                             tool_result += (
                                 "\n\n[llama_web: Check whether this result satisfies the request. "
@@ -7422,20 +7163,15 @@ def _restore_default_model() -> None:
         "vllm": vllm,
         "opencode": zen,
         "kobold": kobold,
-        "fastflowlm": fastflowlm,
     }
     backend = clients.get(backend_name)
-    if backend is fastflowlm and fastflowlm.requests_paused():
-        print("Startup model: preserving manual FastFlowLM unload.", flush=True)
-        return
     if backend is None:
         print(f"Startup model: unknown backend in saved default: {backend_name}", flush=True)
         return
 
     try:
-        # Validate before changing NPU ownership. A removed/stale default previously
-        # stopped the currently working FastFlow service first, then failed to load the
-        # missing Lemonade model, leaving chat with no usable LLM after every restart.
+        # Validate before changing NPU ownership. A removed/stale default must not
+        # evict a working model before failing to load a model that no longer exists.
         # Keep the existing backend untouched when the configured model no longer exists.
         if not backend.owns_model(model):
             print(
@@ -7444,8 +7180,6 @@ def _restore_default_model() -> None:
                 flush=True,
             )
             return
-        if backend is fastflowlm:
-            fastflowlm.check_loadable(model)
         if backend is zen:
             # Remote opencode.ai models do not consume this machine's resources;
             # selecting them must not evict a useful local model during startup.
@@ -7457,9 +7191,7 @@ def _restore_default_model() -> None:
             # Kobold service surviving from the previous session loaded alongside the
             # restored default, despite the one-reasoning-model rule.
             _unload_reasoning_models_before_load(model)
-            is_npu = backend is fastflowlm or (
-                backend is lemonade and lemonade.is_npu_model(model)
-            )
+            is_npu = backend is lemonade and lemonade.is_npu_model(model)
             if is_npu:
                 handle = _claim_selected_npu(backend, model)
                 npu_request_lock.release(handle)

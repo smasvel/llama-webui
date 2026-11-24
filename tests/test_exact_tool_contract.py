@@ -1,12 +1,12 @@
+from llama_web.core import sse_tool_helpers as flm
 import copy
 import json
 import unittest
 from unittest.mock import Mock
 
 from llama_web.compat import exact_tool_contract as contract
-from llama_web.backends import flm_tool_shim as flm
 from tools.opencode_scenarios import TOOLS
-from tools.test_flm_model import decode
+from tests.sse_helpers import decode
 
 ARGS = {'filePath': '/project/x.py', 'oldString': 'return price + tax_rate', 'newString': 'return price + price * tax_rate'}
 

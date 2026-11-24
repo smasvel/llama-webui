@@ -59,7 +59,7 @@ with contextlib.ExitStack() as stack:
     stack.enter_context(patch.object(app.lemonade, "synthesize_speech", side_effect=synthesize))
     stack.enter_context(patch.object(app, "_recall_memory", return_value=None))
     stack.enter_context(patch.object(app, "_remember_exchange"))
-    for backend in (app.lemonade, app.kobold, app.vllm, app.q38rocm, app.fastflowlm, app.zen):
+    for backend in (app.lemonade, app.kobold, app.vllm, app.q38rocm, app.zen):
         stack.enter_context(patch.object(backend, "owns_model", return_value=False))
     server = make_server("127.0.0.1", 0, app.app, threaded=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()

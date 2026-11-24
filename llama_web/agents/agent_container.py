@@ -217,7 +217,7 @@ class _ModelProxyHandler(BaseHTTPRequestHandler):
                     task_id=proxy.get('task_id'), owner_id=proxy.get('owner_id'),
                     model=proxy.get('model_id') or request_body.get('model') or 'unknown',
                     max_tokens=request_body.get('max_tokens') or request_body.get('max_completion_tokens'),
-                    is_npu=proxy.get('provider_id') == 'fastflowlm',
+                    is_npu=False,
                     request_content=request_text,
                 )
             base_url = proxy['base_url']
@@ -672,7 +672,7 @@ class ContainerOpenCode(OpenCode):
         # and agent name, so a rebuilt container keeps the same identifier.
         headers['X-llama_web-Agent-Session'] = hashlib.sha256(
             f'{socket_path}:{agent_name}'.encode()).hexdigest()[:40]
-        if provider_id in ('lemonade', 'fastflowlm', 'lmstudio'):
+        if provider_id in ('lemonade', 'lmstudio'):
             headers['X-llama_web-Agent-Relay'] = '1'
         api_key = options.get('apiKey')
         auth_plan = None

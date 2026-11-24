@@ -9,7 +9,7 @@ from llama_web.backends import lmstudio_tool_shim
 from llama_web.core.model_stream_cancel import Registry
 from llama_web.backends import lmstudio_thinking
 from tools.opencode_scenarios import QUESTION
-from tools.test_flm_model import decode
+from tests.sse_helpers import decode
 from tests.test_exact_file_content import request_body, payload, stream_lines, WANTED
 
 

@@ -16,7 +16,7 @@ from werkzeug.serving import make_server
 
 with contextlib.ExitStack() as stack:
  directory=stack.enter_context(tempfile.TemporaryDirectory(prefix='llama_web-agent-browser-'))
- fake=Mock();model={'providerID':'fastflowlm','id':'flm/qwen3-it:4b'}
+ fake=Mock();model={'providerID':'llamacpp','id':'llamacpp/test'}
  fake.models.return_value=[{**model,'name':'Fixture Qwen'}];fake.create.return_value='ses_browser'
  snap={'active':True,'forms':[],'permissions':[],'inbox':[],'messages':[]}
  fake.snapshot.side_effect=lambda _:json.loads(json.dumps(snap))

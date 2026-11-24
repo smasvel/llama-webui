@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from llama_web.agents.agent_tasks import Manager, MARKER, FIRST_TOKEN_TIMEOUT, PROGRESS_TIMEOUT, HANDOFF_TIMEOUT
 import app
 
-MODEL = {'providerID': 'fastflowlm', 'id': 'flm/qwen3-it:4b'}
+MODEL = {'providerID': 'llamacpp', 'id': 'llamacpp/test-model'}
 
 
 def assistant(key, text, **extra):
@@ -1103,21 +1103,6 @@ class AgentAPITests(unittest.TestCase):
             r=self.client.post('/api/agent-tasks',json={},headers={'X-CSRF-Token':'test'})
         self.assertEqual(r.status_code,409);self.manager.create.assert_not_called()
 
-    def test_active_agent_prevents_manual_model_switch_and_tests(self):
-        self.login();self.manager.busy.return_value=True
-        for path in ('/api/models/load','/api/models/unload','/api/model-tests'):
-            r=self.client.post(path,json={},headers={'X-CSRF-Token':'test'})
-            self.assertEqual(r.status_code,409,path)
-        self.manager.list.return_value = [{'status': 'running', 'model': MODEL}]
-        r = self.client.post('/api/models/delete', json={'identifier': MODEL['id']},
-                             headers={'X-CSRF-Token': 'test'})
-        self.assertEqual(r.status_code, 409)
-
-    def test_healthy_already_serving_model_does_not_reload_optional_backends(self):
-        with patch.object(app.fastflowlm,'requests_paused',return_value=False), patch.object(app.fastflowlm,'current_served_model',return_value=MODEL['id']), patch.object(app.requests,'get',return_value=Mock()) as get, patch.object(app,'_test_load_model') as load:
-            app._prepare_agent_model({'model':MODEL})
-        load.assert_not_called();get.assert_called_once()
-
     def test_healthy_loaded_lemonade_model_is_reused_for_agent(self):
         model = {'providerID': 'lemonade', 'id': 'Ornith-1.5-9B-GGUF'}
         with patch.object(app.lemonade, 'list_models', return_value=[{
@@ -1166,11 +1151,6 @@ class AgentAPITests(unittest.TestCase):
             app._prepare_agent_model({'model': model})
         load.assert_called_once_with({'backend': 'lemonade', 'id': model['id'],
                                       'context_length': 65536})
-
-    def test_explicit_resume_loads_a_manually_unloaded_model(self):
-        with patch.object(app.fastflowlm,'requests_paused',return_value=True), patch.object(app,'_test_load_model') as load:
-            app._prepare_agent_model({'model':MODEL})
-        load.assert_called_once_with({'backend':MODEL['providerID'],'id':MODEL['id'],'context_length':16384})
 
     def test_startup_preserves_agent_backend(self):
         self.manager.busy.return_value=True

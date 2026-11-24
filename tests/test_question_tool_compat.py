@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from llama_web.backends import lemonade_guard_shim as shim
 from llama_web.compat import question_tool_compat as compat
 from tools.opencode_scenarios import QUESTION, question
-from tools.test_flm_model import decode, run_suite
+from tests.sse_helpers import decode, Cancelled
 
 
 ARGS = question('Install optional analytics?', 'Analytics', [('Install', 'Add analytics'),
@@ -148,17 +148,3 @@ class QuestionCompatTests(unittest.TestCase):
                     calls, _, _, _ = decode(decoded, stream)
                     self.assert_question(calls[0]['arguments'])
 
-    def test_large_code_request_budget_and_failure_diagnostics(self):
-        response = Mock()
-        response.json.return_value = {'choices': [{'message': {'content': 'incomplete'}, 'finish_reason': 'length'}],
-                                     'usage': {'completion_tokens': 1024}}
-        patcher = patch('tools.test_flm_model.live_report', Mock())
-        patcher.start(); self.addCleanup(patcher.stop)
-        with patch('tools.test_flm_model.requests.post', return_value=response) as post:
-            results = run_suite('GLM-4.7-Flash-GGUF', 'http://fixture', suite='core', only={('large-code-input', False)})
-        body = post.call_args.kwargs['json']
-        self.assertEqual(body['max_tokens'], 1024)
-        self.assertIs(body['chat_template_kwargs']['enable_thinking'], False)
-        self.assertFalse(results[0]['passed'])
-        self.assertIn('reply budget=1024', results[0]['error'])
-        self.assertEqual(results[0]['usage']['completion_tokens'], 1024)

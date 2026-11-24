@@ -23,7 +23,7 @@ class RagBackendRoutingTests(unittest.TestCase):
             ("lmstudio-model", "lemonade"),
             ("vllm-model", "lemonade"),
             ("koboldcpp/model", "kobold"),
-            ("fastflowlm-model", "lemonade"),
+            ("llamacpp-model", "lemonade"),
             ("q38rocm-model", "lemonade"),
             ("opencode/model", "lemonade"),
         )

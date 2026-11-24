@@ -81,7 +81,7 @@ class OpenCodeAdapterTests(unittest.TestCase):
 
     def test_small_context_models_are_visible_but_not_assignable(self):
         client=OpenCode()
-        with patch.object(client,'call',return_value={'data':[{'providerID':'fastflowlm','id':'flm/qwen3.8-mtp:27b','name':'Qwen'}]}), patch('llama_web.agents.agent_opencode.flm_context.context_limit',return_value=8192):
+        with patch.object(client,'call',return_value={'data':[{'providerID':'llamacpp','id':'llamacpp/small','name':'Small','limit':{'context':8192}}]}):
             model=client.models()[0]
         self.assertFalse(model['usable']);self.assertEqual(model['context'],8192)
 

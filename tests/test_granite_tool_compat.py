@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from llama_web.compat import granite_tool_compat as compat
 from llama_web.backends import lemonade_guard_shim as shim
 from tools.opencode_scenarios import TOOLS, question
-from tools.test_flm_model import decode
+from tests.sse_helpers import decode
 
 
 ARGS = question('Which features?', 'Features', [('API', 'HTTP'), ('CLI', 'Terminal')], True)

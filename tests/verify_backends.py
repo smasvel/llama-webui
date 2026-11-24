@@ -20,7 +20,6 @@ def main() -> None:
     from llama_web.backends import lemonade_client as lemonade
     from llama_web.backends import lmstudio_client as lms
     from llama_web.backends import vllm_client as vllm
-    from llama_web.backends import fastflowlm_client as flm
     import app
     from llama_web.backends import kobold_client
 

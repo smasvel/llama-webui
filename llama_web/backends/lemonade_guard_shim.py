@@ -23,7 +23,7 @@ to guard.
 Runs as its own systemd --user unit (lemonade-guard-shim.service) on 127.0.0.1:13306. Caddy's
 :8444 block points its `reverse_proxy` here instead of Lemonade's raw 13305 so LAN clients get
 the guard; this app's own lemonade_client.py talks to Lemonade directly on 13305 and is
-unaffected either way — same relationship fastflowlm_client.py has with flm_tool_shim.py, and
+unaffected either way — same relationship the other local shims have, and
 for the same reason (app.py's own load path already runs _free_npu_except() itself).
 """
 from __future__ import annotations
@@ -45,7 +45,6 @@ from llama_web.agents import agent_request_policy
 from llama_web.compat import granite_tool_compat
 from flask import Flask, Response, request
 
-from llama_web.backends import fastflowlm_client as fastflowlm
 from llama_web.backends import lemonade_client
 from llama_web.core import live_report
 from llama_web.core import advice_disclaimer
@@ -54,8 +53,7 @@ from llama_web.core import npu_request_lock
 from llama_web.core import generation_guard
 from llama_web.backends import lemonade_templates
 from llama_web.backends import lemonade_thinking
-from llama_web.backends import flm_context
-from llama_web.backends.flm_tool_shim import (
+from llama_web.core.sse_tool_helpers import (
     _flm_stream_lines,
     _repair_streamed_textual_tool_calls, _repair_textual_tool_calls,
     _streamable_text_prefix, _live_content_event, _remove_streamed_content_prefix,
@@ -570,19 +568,6 @@ def _post_chat_with_utf8_recovery(body: dict, headers: dict, streamed: bool):
     raise AssertionError("unreachable")
 
 
-def _free_fastflowlm_npu() -> None:
-    """Stop the standalone flm.service, freeing the NPU — mirrors app.py's
-    _free_npu_except() and flm_tool_shim.py's _free_lemonade_npu(), for this shim's own
-    direction of the same conflict. Reuses fastflowlm_client's own unload (same systemctl
-    stop, same polkit rule already in place for it) rather than duplicating that logic.
-    Fails silently: flm.service simply not running is the common case, not an error, and
-    this must never block a Lemonade request that would otherwise be perfectly fine."""
-    try:
-        fastflowlm.unload_model(npu_lock_held=True)
-    except fastflowlm.FastFlowLMError:
-        pass
-
-
 def _unload_before_implicit_load(model_id: str) -> None:
     """Make Lemonade's traffic-driven model selection explicitly unload-first.
 
@@ -602,7 +587,7 @@ def _unload_before_implicit_load(model_id: str) -> None:
         health = requests.get(f"{LEMONADE_BASE}/v1/health", timeout=5)
         health.raise_for_status()
         models = health.json().get("all_models_loaded", [])
-        saved_context = flm_context.lemonade_load_context(model_id, _saved_model_context(model_id))
+        saved_context = _saved_model_context(model_id)
         for entry in models:
             if entry.get("model_name") == model_id and entry.get("loaded", True):
                 options = lemonade_templates.load_options(
@@ -761,7 +746,6 @@ def chat_completions():
         _NPU_REQUEST_LOCK.acquire()
         npu_lock_held = True
         cross_npu_lock = npu_request_lock.acquire()
-        _free_fastflowlm_npu()
     if body.get("model"):
         try:
             _unload_before_implicit_load(model)

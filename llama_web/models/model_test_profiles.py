@@ -5,7 +5,7 @@ RECIPE = 'strict-tools-v1'
 
 
 def key(backend, model):
-    canonical = str(model).removeprefix('flm/') if backend == 'fastflowlm' else str(model)
+    canonical = str(model)
     return 'tool_test_profile:' + backend + ':' + canonical
 
 

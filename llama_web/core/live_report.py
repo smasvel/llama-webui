@@ -1,4 +1,4 @@
-"""Thin HTTP client the LAN-facing shims (flm_tool_shim.py, lemonade_guard_shim.py) use to
+"""Thin HTTP client the LAN-facing shims (lemonade_guard_shim.py) use to
 report live streaming activity into the main app's live_requests.py registry.
 
 Why this exists at all: live_requests.py's registry is an in-memory dict inside the ai-webui

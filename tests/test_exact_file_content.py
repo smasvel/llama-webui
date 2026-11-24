@@ -1,3 +1,4 @@
+from llama_web.core import sse_tool_helpers as flm_tool_shim
 import contextlib
 import copy
 import json
@@ -6,9 +7,8 @@ from unittest.mock import Mock, patch
 
 from llama_web.compat import exact_file_content as repair
 from llama_web.backends import lemonade_guard_shim as shim
-from llama_web.backends import flm_tool_shim
 from tools.opencode_scenarios import TOOLS
-from tools.test_flm_model import decode
+from tests.sse_helpers import decode
 
 WANTED = {'filePath': '/project/test.py', 'content': 'def test_ok():\n    assert True\n'}
 ACTUAL = {**WANTED, 'content': '\ndef test_ok():\n\n    assert True'}

@@ -31,15 +31,11 @@ DEFAULT_PORT = int(os.environ.get("LLAMA_WEB_BACKEND_BROKER_PORT", "8765"))
 DEFAULT_TOKEN_FILE = os.path.expanduser(
     os.environ.get("LLAMA_WEB_BACKEND_BROKER_TOKEN_FILE", "~/.config/llama_web/backend-broker/token")
 )
-# Docker llama_web drives these three host units. Keeping the list explicit makes the blast
-# radius of a leaked token very small. FastFlowLM is a *system* unit (NPU memlock); vLLM
-# and KoboldCPP are user units, and the broker preserves that scope distinction.
-_DEFAULT_SERVICES = "vllm.service,kobold.service,q38rocm.service,flm.service"
+# Docker llama_web drives these host units. Keeping the list explicit keeps the blast
+# radius of a leaked token very small.
+_DEFAULT_SERVICES = "vllm.service,kobold.service,q38rocm.service"
 _ALLOWED_VERBS = frozenset({"start", "stop", "restart", "daemon-reload", "is-active", "is-enabled"})
 _ALLOWED_SCOPES = frozenset({"user", "system"})
-# The FLM CLI is only used from Docker llama_web to keep model *inventory*, download and
-# delete in sync with the host backend; fade in every actual `flm` verb llama_web needs.
-_FLM_ACTIONS = frozenset({"list", "pull", "remove", "--version", "pull-progress"})
 _ALLOWED_UNITS = frozenset(
     service.strip() for service in os.environ.get(
         "LLAMA_WEB_BACKEND_BROKER_SERVICES", _DEFAULT_SERVICES
@@ -98,201 +94,6 @@ def run_systemctl(args: list[str], service: str, scope: str = "user", timeout: i
     return proc.returncode, proc.stdout, proc.stderr
 
 
-_FLM_STATE = threading.Lock()
-
-_FLM_BIN = os.environ.get("LLAMA_WEB_BACKEND_BROKER_FLM_BIN", "/opt/fastflowlm/bin/flm")
-_FLM_LIB_DIR = os.environ.get("LLAMA_WEB_BACKEND_BROKER_FLM_LIB", "/opt/fastflowlm/lib")
-_FLM_MODEL_ROOT = os.path.expanduser(os.environ.get(
-    "LLAMA_WEB_BACKEND_BROKER_FLM_MODEL_ROOT", "~/.config/flm/models"
-))
-
-# The broker keeps one concurrent "flm pull" so a leaked token cannot queue up disk fills;
-# two pulls racing on the host only costs disk space, so anything more is purely cosmetic.
-_FLM_PULL_LOCK = threading.Lock()
-_FLM_PULL_STATE: dict = {"proc": None, "tag": None}
-
-
-class _FlmPullState:
-    """State of the one ``flm pull`` the broker is allowed to run at a time."""
-
-    @staticmethod
-    def running() -> bool:
-        with _FLM_PULL_LOCK:
-            proc = _FLM_PULL_STATE.get("proc")
-            if proc and proc.poll() is None:
-                return True
-            if proc and proc.poll() is not None:
-                _FLM_PULL_STATE.update(proc=None, tag=None)
-            return False
-
-    @staticmethod
-    def tag() -> str | None:
-        with _FLM_PULL_LOCK:
-            return _FLM_PULL_STATE.get("tag")
-
-    @staticmethod
-    def start(proc: subprocess.Popen, tag: str) -> None:
-        with _FLM_PULL_LOCK:
-            _FLM_PULL_STATE["proc"] = proc
-            _FLM_PULL_STATE["tag"] = tag
-
-
-_FLM_PULL = _FlmPullState()
-
-# Keep a *,-* style ELLPSIS retry wall so a leaked token cannot start a shell; a malformed
-# tag is rejected before exec so a bare ``flm serve`` never starts from the broker.
-_TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,120}$")
-
-
-def _flm_environment() -> dict | None:
-    if not os.path.isfile(_FLM_BIN):
-        return None
-    env = {**os.environ, "LD_LIBRARY_PATH": _FLM_LIB_DIR}
-    env.pop("FLM_BIN", None)
-    return env
-
-
-def run_flm(args: list[str], timeout: int = 900, background: bool = False) -> dict:
-    """Run the FLM CLI on the llama_web host for the verbs llama_web uses from Docker."""
-    if not _flm_environment():
-        raise BrokerError("FastFlowLM binary was not found on the broker host")
-    verb = args[0] if args else ""
-    if verb == "--version":
-        # Read-only: just report the runtime version.
-        proc = subprocess.run([_FLM_BIN, *args], capture_output=True, text=True, timeout=timeout)
-        return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
-    if verb not in {"list", "pull", "remove", "pull-progress"}:
-        raise BrokerError(f"unsupported flm verb '{verb}'")
-    tag_args = args[1:]
-    if verb == "list":
-        if tag_args not in (
-            ["--filter", "installed", "--json"],
-            ["--filter", "all", "--json"],
-        ):
-            raise BrokerError("unsupported flm list filter")
-        proc = subprocess.run([_FLM_BIN, *args], capture_output=True, text=True, timeout=timeout)
-        return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
-    if verb == "pull-progress":
-        return _flm_pull_progress()
-    tag = tag_args[0] if tag_args else ""
-    if not _TAG_RE.match(tag) or len(tag_args) != 1:
-        raise BrokerError(f"unsupported flm {verb} target '{tag}'")
-    if verb == "pull":
-        if _FLM_PULL.running():
-            raise BrokerError(
-                "a FastFlowLM pull is already running on the host; wait for it to finish"
-            )
-        if background:
-            proc = subprocess.Popen(
-                [_FLM_BIN, "pull", tag],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                text=True, env=_flm_environment(),
-            )
-            _FLM_PULL.start(proc, tag)
-            return {"ok": True}
-        proc = subprocess.run([_FLM_BIN, *args], capture_output=True, text=True, timeout=timeout)
-        return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
-    # remove
-    proc = subprocess.run([_FLM_BIN, *args], capture_output=True, text=True, timeout=timeout)
-    return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
-
-
-def _flm_pull_progress() -> dict:
-    """Percent/bytes progress for a broker-started or CLI-started host ``flm pull``."""
-    # Read-only, allowed regardless of whether a broker pull is in flight: a CLI pull the
-    # user started on the host should surface in the Docker app just like any other.
-    import glob as globlib
-
-    running = _FLM_PULL.running()
-    tag = _FLM_PULL.tag()
-    if not running:
-        # Fall back to a host pgrep: a pull someone started outside the broker.
-        try:
-            out = subprocess.run(
-                ["pgrep", "-af", "flm pull"], capture_output=True, text=True, timeout=5
-            ).stdout
-        except (subprocess.SubprocessError, OSError):
-            out = ""
-        for line in out.splitlines():
-            if "pull" not in line:
-                continue
-            # "1234 /opt/fastflowlm/bin/flm pull qwen3:0.6b --force"
-            parts = [p for p in line.split() if p != "-"]
-            if parts and (idx := [i for i, p in enumerate(parts) if p == "pull"]):
-                candidate = parts[idx[0] + 1] if idx[0] + 1 < len(parts) else ""
-                if candidate and not candidate.startswith("-"):
-                    tag, running = candidate, True
-                    break
-    if not running or not tag:
-        return {"running": False}
-    total = _flm_expected_bytes(tag)
-    if not total:
-        return {"running": True, "tag": tag, "percent": 0, "bytes_downloaded": 0, "bytes_total": None}
-    directory = _flm_model_dir(tag)
-    import os.path as osp
-
-    if not directory:
-        return {"running": True, "tag": tag, "percent": 0, "bytes_downloaded": 0, "bytes_total": None}
-    cur = sum(osp.getsize(f) for f in globlib.glob(osp.join(directory, "**", "*"), recursive=True) if osp.isfile(f))
-    pct = int(min(99, cur * 100 / total)) if total else 0
-    return {
-        "running": True,
-        "tag": tag,
-        "percent": pct,
-        "bytes_downloaded": cur,
-        "bytes_total": total,
-    }
-
-
-def _flm_model_dir(tag: str) -> str | None:
-    """On-disk directory for `tag`, matching the on-disk name of the pull catalog."""
-    try:
-        from pathlib import Path
-        root = Path(_FLM_MODEL_ROOT)
-        if not root.is_dir():
-            return None
-        for child in sorted(root.iterdir()):
-            if child.is_dir() and _TAG_RE.match(child.name):
-                # The FLM pull stores its weights under ~/.config/flm/models/<hf-repo>;
-                # the app's own progress path uses the *catalog* dir name (hf repo name)
-                # and it doesn't depend on the tag. Use the catalog mapping through the
-                # state dir's on-disk representation of the tag passed in.
-                if child.name == tag:
-                    return str(child)
-        return None
-    except OSError:
-        return None
-
-
-def _flm_expected_bytes(tag: str) -> int | None:
-    catalog = _flm_catalog()
-    return catalog.get(tag)
-
-
-def _flm_catalog() -> dict:
-    try:
-        proc = subprocess.run(
-            [_FLM_BIN, "list", "--filter", "all", "--json"],
-            capture_output=True, text=True, timeout=20,
-            env=_flm_environment(),
-        )
-    except (subprocess.SubprocessError, OSError):
-        return {}
-    if proc.returncode != 0:
-        return {}
-    try:
-        data = json.loads(proc.stdout or "{}")
-    except (ValueError, TypeError):
-        return {}
-    out: dict = {}
-    for item in data.get("models") or []:
-        tag = item.get("model") or item.get("name")
-        fp = item.get("footprint")
-        if isinstance(tag, str) and isinstance(fp, (int, float)):
-            out[tag] = int(float(fp) * 1e9)
-    return out
-
-
 class _Handler(BaseHTTPRequestHandler):
     server_version = "llama_web-backend-broker/1"
     # Quiet down request logging; the token must never be logged.
@@ -319,7 +120,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not token:
             self._reject(503, json.dumps({"error": "backend broker is not configured"}))
             return
-        if self.path.rstrip("/") not in {"/systemd", "/flm"}:
+        if self.path.rstrip("/") != "/systemd":
             self._reject(404, json.dumps({"error": "unknown endpoint"}))
             return
         auth = self.headers.get("Authorization", "")
@@ -344,24 +145,6 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as exc:  # pragma: no cover - unexpected failure path
                 self._reject(500, json.dumps({"error": str(exc)}))
                 return
-        else:
-            try:
-                args = [str(x) for x in body["args"]]
-                result = run_flm(args, background=bool(body.get("background", True)))
-            except BrokerError as exc:
-                self._reject(400, json.dumps({"error": str(exc)}))
-                return
-            except Exception as exc:  # pragma: no cover - unexpected failure path
-                self._reject(500, json.dumps({"error": str(exc)}))
-                return
-            payload = result
-        self.send_response(200)
-        payload_bytes = json.dumps(payload).encode()
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload_bytes)))
-        self.end_headers()
-        self.wfile.write(payload_bytes)
-
 
 def broker_main() -> None:
     port = DEFAULT_PORT

@@ -60,7 +60,7 @@ def main():
             yield "data: [DONE]"
 
         stack.callback(finish_reply.set)
-        for backend in (app.lemonade, app.q38rocm, app.vllm, app.zen, app.kobold, app.fastflowlm):
+        for backend in (app.lemonade, app.q38rocm, app.vllm, app.zen, app.kobold):
             stack.enter_context(patch.object(backend, "owns_model", return_value=False))
         stack.enter_context(patch.object(app, "_recall_memory", return_value=None))
         stack.enter_context(patch.object(app, "_remember_exchange"))

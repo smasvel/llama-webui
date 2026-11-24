@@ -31,7 +31,6 @@ BACKENDS = (
     ("lemonade", 8444, 13306),
     ("vllm", 8445, 8000),
     ("kobold", 8446, 5001),
-    ("fastflowlm", 8447, 52626),
 )
 TOKEN_LABELS = ("opencode", "vscode", "lan")
 

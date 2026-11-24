@@ -19,15 +19,9 @@ with contextlib.ExitStack() as stack:
     stack.callback(app.users_store.delete_user, admin['id'])
     stack.enter_context(patch.dict(app.app.config, {'SESSION_COOKIE_SECURE': False}))
     stack.enter_context(patch.object(app, '_test_model_inventory', return_value=[]))
-    for backend in (app.lms, app.lemonade, app.vllm, app.kobold, app.fastflowlm):
+    for backend in (app.lms, app.lemonade, app.vllm, app.kobold):
         stack.enter_context(patch.object(backend, 'list_models', return_value=[]))
     stack.enter_context(patch.object(app.help_data, 'tailscale_ip', return_value=None))
-    stack.enter_context(patch.object(app.flm_conversion, 'availability', return_value={
-        'available': False, 'missing': ['test fixture'], 'output_root': '/tmp',
-        'supported_profile': {}, 'backend_profile': {},
-    }))
-    stack.enter_context(patch.object(app.flm_conversion, 'discover_models', return_value=[]))
-    stack.enter_context(patch.object(app.flm_conversion, 'list_jobs', return_value=[]))
     server = make_server('127.0.0.1', 0, app.app, threaded=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     stack.callback(server.shutdown)
@@ -188,7 +182,6 @@ with contextlib.ExitStack() as stack:
         live_page = live_context.new_page()
         live_page.on('pageerror', lambda error: errors.append(str(error)))
         live_rows = [{
-            'id': 987654, 'source': 'ui-test', 'backend': 'fastflowlm', 'model': 'fixture-model',
             'is_npu': True, 'tokens': 12, 'tokens_per_sec': 4.0, 'elapsed_s': 3.0,
             'status': 'done', 'started_at': time.time() - 3, 'finished_at': time.time(),
         }]
@@ -210,7 +203,6 @@ with contextlib.ExitStack() as stack:
         # row (and remove it after) to make the empty/refresh assertions deterministic.
         metrics_rows_before = app.metrics_store.summary(hours=24)['totals']['requests']
         app.metrics_store.record(
-            ts=time.time(), source='ui-test', backend='fastflowlm', model='admin-coverage-fixture-model',
             request_type='chat_completion', ask_category='chat', status=200, duration_ms=1500,
             prompt_tokens=7, completion_tokens=5, total_tokens=12, tokens_per_sec=4.0, tops_used=None,
             npu_percent=None, is_npu=True, user_id=admin['id'])
@@ -218,7 +210,6 @@ with contextlib.ExitStack() as stack:
         # it to show only the seeded fixture row — keeps the empty-state assertion deterministic.
         stack.enter_context(patch.object(app.metrics_store, 'model_report',
                                          return_value=[{'model': 'admin-coverage-fixture-model',
-                                                        'backend': 'fastflowlm', 'requests': 1,
                                                         'input_tokens': 7, 'output_tokens': 5,
                                                         'token_samples': 1, 'avg_tps': 4.0,
                                                         'speed_samples': 1, 'avg_ms': 1500.0,
