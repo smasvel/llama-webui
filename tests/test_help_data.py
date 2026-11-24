@@ -201,5 +201,24 @@ class OpenCodeConsoleConfigTests(unittest.TestCase):
         self.assertLessEqual(entry["limit"]["output"], 65536 // 4)
 
 
+class GeneratedOpenCodeConfigTests(unittest.TestCase):
+    @patch.object(help_data, "_all_models", return_value=[
+        {"id": "llamacpp/qwen.gguf", "backend": "llamacpp", "type": "llm",
+         "state": "loaded", "loaded_context_length": 16384},
+    ])
+    def test_config_contains_bearer_key_and_base_url(self, _models):
+        text = help_data.build_opencode_jsonc("192.0.2.10", 18474, "test-key", "local")
+        self.assertIn("https://192.0.2.10:18474/v1", text)
+        self.assertIn('"apiKey": "test-key"', text)
+        self.assertIn('"X-llama_web-Client": "opencode"', text)
+        self.assertIn("llamacpp/qwen.gguf", text)
+
+    @patch.object(help_data, "_all_models", return_value=[])
+    def test_tailscale_config_uses_tailscale_label(self, _models):
+        text = help_data.build_opencode_jsonc("remote.example", 18474, "key", "Tailscale")
+        self.assertIn("remote.example", text)
+        self.assertIn("Tailscale", text)
+
+
 if __name__ == "__main__":
     unittest.main()

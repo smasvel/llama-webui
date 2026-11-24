@@ -201,6 +201,8 @@
   }
 
   wireCopyButton(document.getElementById("copy-linux-trust"), document.getElementById("help-linux-trust"));
+  wireCopyButton(document.getElementById("copy-opencode-config"), document.getElementById("help-opencode-config"));
+  wireCopyButton(document.getElementById("copy-tailscale-opencode-config"), document.getElementById("help-tailscale-opencode-config"));
   wireCopyButton(copyCaCertBtn, document.getElementById("help-ca-cert"));
   wireCopyButton(copyConfigYamlBtn, document.getElementById("help-config-yaml"));
   wireCopyButton(copyMacTrustBtn, document.getElementById("help-mac-trust"));

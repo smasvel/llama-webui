@@ -162,6 +162,25 @@
           {% endif %}
           {% endif %}
 
+          <p class="help-heading">OpenCode config</p>
+          <p class="hint">
+            Copy the config for the network your OpenCode client is on. Both use the
+            llama-web HTTPS API with a bearer token; keep the file private because it
+            contains that token as the apiKey.
+          </p>
+          <details class="advanced" open>
+            <summary>Local network</summary>
+            <pre id="help-opencode-config" class="download-log">{{ help.opencode_config }}</pre>
+            <button id="copy-opencode-config" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
+          </details>
+          {% if help.tailscale_opencode_config %}
+          <details class="advanced">
+            <summary>Tailscale network</summary>
+            <pre id="help-tailscale-opencode-config" class="download-log">{{ help.tailscale_opencode_config }}</pre>
+            <button id="copy-tailscale-opencode-config" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
+          </details>
+          {% endif %}
+
           <p class="help-heading">Troubleshooting</p>
           <details class="advanced" open>
             <summary>No model is selectable in Chat</summary>

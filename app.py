@@ -1582,11 +1582,40 @@ def api_chat_model_preference():
 @app.get("/api/help")
 @login_required
 def api_help():
-    """Runtime-generated Help data (LAN IP, Caddy token/ports, CA cert, and the Continue /
-    OpenCode config blocks built from the live model list). The page renders this at load;
-    the client re-fetches it after a model download/load/unload so the help stays current
-    without a full reload."""
+    """Machine-specific Help data: addresses, CA cert and generated client configs."""
     return jsonify(help_data.build(app_port=APP_PORT))
+
+
+@app.route("/v1/models", methods=["GET"])
+@app.route("/v1/chat/completions", methods=["POST"])
+def openai_compatible_api():
+    """OpenAI-compatible proxy to the local llama.cpp engine for coding clients.
+
+    The generated OpenCode configs use the app's HTTPS port (or Tailscale address)
+    and a bearer token so clients never need the engine's loopback port.
+    """
+    expected = llamacpp.api_key()
+    supplied = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not expected or not secrets.compare_digest(supplied, expected):
+        return jsonify({"error": {"message": "Invalid API key", "type": "authentication_error"}}), 401
+    url = f"{llamacpp.base_url()}{request.path}"
+    try:
+        upstream = requests.request(
+            request.method,
+            url,
+            headers={"Authorization": f"Bearer {expected}",
+                     "Content-Type": request.headers.get("Content-Type", "application/json")},
+            data=request.get_data(),
+            stream=True,
+            timeout=(10, 600),
+        )
+    except requests.RequestException as exc:
+        return jsonify({"error": {"message": str(exc), "type": "api_error"}}), 502
+    return Response(
+        stream_with_context(upstream.iter_content(chunk_size=4096)),
+        status=upstream.status_code,
+        content_type=upstream.headers.get("Content-Type", "application/json"),
+    )
 
 
 @app.get("/ca-cert")

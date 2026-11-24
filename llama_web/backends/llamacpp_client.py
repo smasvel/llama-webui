@@ -49,6 +49,13 @@ def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"} if key else {}
 
 
+def api_key() -> str | None:
+    try:
+        return ENGINE_KEY.read_text().strip() or None
+    except OSError:
+        return None
+
+
 def served_model() -> dict | None:
     """Return the engine's currently served model entry, or None when unavailable."""
     try:
