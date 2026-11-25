@@ -65,9 +65,9 @@ certificate. The first visit asks you to create the administrator account.
 `~/.config/llama-web/server.conf` is the engine configuration:
 
 ```bash
-LLAMA_SERVER="/home/<user>/.local/share/llama-web/engine/bin/llama-server"
+LLAMA_SERVER="/home/<user>/.local/share/llama-web/engine-prism/llama-server"
 LLAMA_MODEL="/home/<user>/.local/share/llama-web/models/<repo>/<file>.gguf"
-LLAMA_ARGS="-dev Vulkan0 -ngl 99 --flash-attn off -c 16384 -b 1024 -ub 64 -t 16 --repeat-penalty 1.05 -ctk f16 -ctv f16 --no-mmap --cont-batching --kv-unified --parallel 1"
+LLAMA_ARGS="-dev Vulkan0 -ngl 99 --flash-attn off -c 16384 -b 1024 -ub 64 -t 16 --repeat-penalty 1.05 -ctk f16 -ctv f16 --cont-batching --kv-unified --parallel 1"
 LLAMA_ARG_CTX_SIZE=16384
 ```
 
@@ -83,21 +83,38 @@ Models can also be loaded from the Models page, which writes the selected GGUF
 and context size into `server.conf` and restarts the engine. The engine is a
 single-model server: loading one model replaces the currently served one.
 
-The 27B NVFP4 Qwen model can only be served at 16,384 tokens on the Radeon 890M
-Vulkan runtime; larger FP16-KV windows crash the device, and q8_0 KV produces
-corrupt output. The app caps that model's served window accordingly even though
-the model file advertises a much larger native maximum.
+Linux installs use the PrismML llama.cpp fork from
+`~/.local/share/llama-web/engine-prism/` (installed by
+`deploy/install-prism-engine.sh`). It serves ordinary quants and also loads
+PTQ1_0/PQ2_0 ternary GGUFs such as `Ternary-Bonsai-2-27B-PTQ1_0`; the upstream
+engine cannot load tensor type 143 (PTQ1_0) and fails with "failed to read tensor
+info". The Prism engine does not accept `--no-mmap` (mmap is its default), so the
+flags above omit it.
+
+On the Radeon 890M Vulkan runtime, 65,536-token loading works with the smaller
+MTP IQ3Floor (~11 GB), Q3_K_M (~13 GB) and Ternary-Bonsai PTQ1_0 (~6 GB) GGUFs
+using the flags above. The 16 GB NVFP4 build can only be served at 16,384 tokens:
+larger FP16-KV windows crash the device, and q8_0 KV produces corrupt output.
+Each model's native maximum comes from its GGUF metadata and is shown on the
+Models page; set a loading context smaller than that maximum.
 
 ## Chat tools
 
 Chat can use local MCP tools (Playwright browser inspection and the Python REPL)
-when the request clearly needs them. The runtime paths are resolved in
+when the request clearly needs them. MCP browser tools, the Python REPL and live
+web search are all enabled by default on a first-time install; the Settings page
+has separate **Enable MCP browser tools** and **Enable Python tool** switches to
+turn them off independently. The Python tool runs in the application virtualenv
+(the `mcp` package is in `requirements.txt`) and does not depend on web search.
+The installer sets up Node,
+`@playwright/mcp` and Chromium under `~/.local/share/llama-web/` unless
+`--skip-browser` was passed. The runtime paths are resolved in
 `llama_web/integrations/mcp_tools_client.py`; override them with
 `LLAMA_WEB_NODE_BIN`, `LLAMA_WEB_PLAYWRIGHT_MCP_CLI`, `LLAMA_WEB_CHROMIUM_PATH`
 and `PLAYWRIGHT_BROWSERS_PATH` if your tools live elsewhere.
 
-Browser chat tools require a working Chromium and an X display. The Python REPL
-uses the application virtualenv.
+Browser chat tools require a working Chromium; the Playwright MCP server is
+started in headless mode. The Python REPL uses the application virtualenv.
 
 ## Coding agents
 

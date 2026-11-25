@@ -20,8 +20,8 @@
   function displayName(m) {
     if (m.name && m.name !== m.id) return m.name;
     const raw = String(m.id || "");
-    const base = raw.split("/").pop() || raw;
-    return base.replace(/\.gguf$/i, "");
+    const base = raw.split(/[\\/]/).pop() || raw;
+    return base.replace(/\.gguf$/i, "") || "Unnamed model";
   }
 
   function formatBytes(n) {
@@ -243,7 +243,7 @@
     if (contextEditable && m.type && !NON_CHAT.includes(m.type) && m.type !== "embedding") {
       const activeContext = Number(m.configured_context_length || m.loaded_context_length || m.context_window_tokens);
       const loadedContext = Number(m.loaded_context_length);
-      const maxContext = Number(m.safe_context_length || m.max_context_length || m.context_window_tokens);
+      const maxContext = Number(m.max_context_length || m.safe_context_length || m.context_window_tokens);
       if (Number.isSafeInteger(activeContext) && activeContext > 0) {
         const ctxField = document.createElement("span");
         ctxField.className = "model-copyable-field";
@@ -391,9 +391,9 @@
       toast("Context size must be at least 512 tokens.", true);
       return;
     }
-    if (Number.isSafeInteger(max) && max > 0 && value > max) {
+    if (Number.isSafeInteger(max) && max > 0 && value >= max) {
       input.value = String(model.configured_context_length || model.loaded_context_length || model.context_window_tokens);
-      toast(`${model.id} supports at most ${max.toLocaleString()} context tokens.`, true);
+      toast(`${model.id} supports a maximum of ${max.toLocaleString()} context tokens; choose a smaller window.`, true);
       return;
     }
     input.disabled = true;
@@ -436,7 +436,7 @@
     const activeModels = models.filter((m) => activeView === "online"
       ? m.backend === "opencode" : m.backend !== "opencode");
     const matching = activeModels.filter((m) =>
-      (!q || (m.id || "").toLowerCase().includes(q)) &&
+      (!q || (m.id || "").toLowerCase().includes(q) || displayName(m).toLowerCase().includes(q)) &&
       (!warningsOnlyEl?.checked || m.resource_warning || m.load_status?.state === "error"));
     const isLoadedLocal = (m) => activeView === "local" && m.state === "loaded";
     const remaining = matching.filter((m) => !isLoadedLocal(m));

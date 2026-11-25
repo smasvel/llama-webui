@@ -92,8 +92,9 @@ PostgreSQL and Caddy.
 Release bundles ship `deploy/install-release.ps1` (PowerShell) and
 `deploy/install-release.sh` (macOS/Linux shell). They install the Python
 environment, PostgreSQL via Docker Compose, the agent image on Linux, and a
-llama.cpp engine binary for the host platform. Models are downloaded from the
-Downloads page after first sign-in.
+llama.cpp engine binary for the host platform — the PrismML fork on Linux (so
+PTQ1_0 ternary GGUFs work) and the upstream build on Windows/macOS. Models are
+downloaded from the Downloads page after first sign-in.
 
 ```powershell
 # Windows
@@ -141,9 +142,22 @@ Override paths with `LLAMA_WEB_CONFIG`, `LLAMA_MODEL_LIBRARY`,
 `LLAMA_WEB_ENGINE_BINARY`, `LLAMA_WEB_NODE_BIN`, `LLAMA_WEB_PLAYWRIGHT_MCP_CLI`,
 `LLAMA_WEB_CHROMIUM_PATH` and `PLAYWRIGHT_BROWSERS_PATH`.
 
-The 27B NVFP4 Qwen model can only be served at 16,384 tokens on the Radeon 890M
-Vulkan runtime; larger FP16-KV windows crash the device, and q8_0 KV produces
-corrupt output. llama-web caps that model's served window accordingly.
+On Linux the engine is the PrismML fork under
+`~/.local/share/llama-web/engine-prism/` (installed by
+`deploy/install-prism-engine.sh`). Besides ordinary quants it loads PTQ1_0 ternary
+GGUFs such as `Ternary-Bonsai-2-27B-PTQ1_0`, which the upstream engine cannot read.
+
+On the Radeon 890M Vulkan runtime, a 65,536-token served window needs a smaller
+GGUF: the verified choices are `Ternary-Bonsai-2-27B-PTQ1_0` (~6 GB),
+`Qwen3.8-27B-UD-KQVQ4-IQ3Floor-10G-MTP` (~11 GB) and `Qwen3.8-27B-Q3_K_M`
+(~13 GB). The 16 GB NVFP4 build is limited to 16,384 tokens. Every model's native
+maximum is read from its GGUF metadata and shown on the Models page; the loading
+context must be smaller than that maximum.
+
+MCP chat tools (Playwright browser and Python REPL) and live web search are
+enabled by default; the Settings page has independent switches for the browser
+tools and the Python REPL and can change web search behaviour. Chat tool routing
+is described in `deploy/FIRST_TIME_INSTALL.md`.
 
 ## Development
 

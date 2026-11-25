@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import struct
 import subprocess
 import time
 from pathlib import Path
@@ -143,6 +144,69 @@ def _quantization(filename: str) -> str:
     return match.group(1).upper() if match else "GGUF"
 
 
+def gguf_max_context(path: Path) -> int | None:
+    """Read `<architecture>.context_length` from a GGUF header without loading weights."""
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(24)
+            if len(header) < 24 or header[:4] != b"GGUF":
+                return None
+            _, _, _, count = struct.unpack("<4sIQQ", header)
+
+            def read(fmt: str):
+                size = struct.calcsize(fmt)
+                data = handle.read(size)
+                return struct.unpack(fmt, data)[0] if len(data) == size else None
+
+            def read_string() -> str | None:
+                length = read("<Q")
+                if not length:
+                    return ""
+                data = handle.read(length)
+                return data.decode("utf-8", "replace") if len(data) == length else None
+
+            def skip_value(value_type: int) -> bool:
+                if value_type == 8:  # string
+                    return read_string() is not None
+                if value_type in (0, 1):  # int8 / uint8
+                    return read("<B") is not None
+                if value_type in (2, 3):  # int16 / uint16
+                    return read("<H") is not None
+                if value_type in (4, 5):  # int32 / uint32
+                    return read("<I") is not None
+                if value_type in (6, 12):  # float / double
+                    return read("<f" if value_type == 6 else "<d") is not None
+                if value_type == 7:  # bool
+                    return read("<?") is not None
+                if value_type in (10, 11):  # uint64 / int64
+                    return read("<Q") is not None
+                return False
+
+            for _ in range(count):
+                key = read_string()
+                value_type = read("<I")
+                if key is None or value_type is None:
+                    return None
+                if value_type == 9:  # array: element type + count + values
+                    element_type = read("<I")
+                    elements = read("<Q")
+                    if elements is None or element_type is None or elements > 1_000_000:
+                        return None
+                    for _ in range(elements):
+                        if not skip_value(element_type):
+                            return None
+                    continue
+                if value_type in (4, 10):  # uint32 / uint64 context length
+                    value = read("<I" if value_type == 4 else "<Q")
+                    if key.endswith(".context_length") and isinstance(value, int) and value > 0:
+                        return value
+                elif not skip_value(value_type):
+                    return None
+    except (OSError, ValueError, struct.error):
+        return None
+    return None
+
+
 def list_models() -> list[dict]:
     """List downloaded llama-web GGUFs, marking the one the engine currently serves."""
     served = served_model()
@@ -169,7 +233,7 @@ def list_models() -> list[dict]:
             "size_gb": round(path.stat().st_size / 1e9, 2),
             "loaded_context_length": served_context if loaded and isinstance(served_context, int) and served_context > 0 else None,
             "configured_context_length": context,
-            "max_context_length": max_context if loaded else None,
+            "max_context_length": max_context if loaded else gguf_max_context(path),
             "safe_context_length": safe_context_limit(),
             "server_model_id": (served or {}).get("id") if loaded else None,
             "compatibility_type": "gguf",

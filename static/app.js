@@ -7,6 +7,21 @@
     kobold: "KoboldCPP",
     opencode: "opencode.ai",
   };
+
+  // Local GGUF identifiers are library-relative paths such as
+  // "llamacpp/<repo>/<repo>-GGUF/<file>.gguf", and the engine can report an
+  // absolute path as its model id. Neither belongs in the UI. Prefer the name
+  // supplied by /api/models; otherwise reduce an id to its file basename.
+  function modelDisplayName(modelOrId) {
+    const m = typeof modelOrId === "string"
+      ? models.find((item) => item.id === modelOrId)
+      : modelOrId;
+    if (m && m.name && m.name !== m.id) return m.name;
+    const raw = String((m && m.id) || modelOrId || "");
+    const base = raw.split(/[\\/]/).pop() || raw;
+    return base.replace(/\.gguf$/i, "") || "Unnamed model";
+  }
+
   const modelListEl = document.getElementById("model-list");
   const modelSelectEl = document.getElementById("model-select");
   let preferredChatModel = modelSelectEl.dataset.preferredModel || "";
@@ -347,7 +362,8 @@
       row.className = `help-model-row${model.state === "loaded" ? " loaded" : ""}`;
       const name = document.createElement("strong");
       name.className = "help-model-name";
-      name.textContent = model.id || "Unnamed model";
+      name.textContent = modelDisplayName(model);
+      name.title = model.id || "";
       const backend = BACKEND_LABELS[model.backend] || model.backend || "Other";
       const status = model.state === "loaded" ? "loaded" : "available";
       const parts = [backend, status, model.type].filter(Boolean);
@@ -406,7 +422,7 @@
     card.innerHTML = `
       <div class="model-card-top">
         <div>
-          <div class="model-name">${escapeHtml(m.id)}</div>
+          <div class="model-name" title="${escapeHtml(m.id || "")}">${escapeHtml(modelDisplayName(m))}</div>
           <div class="model-meta">${metaHtml}</div>
         </div>
         <span class="badge ${loaded ? "loaded" : "not-loaded"}">${loaded ? "loaded" : (unavailable ? "converted · blocked" : "not loaded")}</span>
@@ -448,7 +464,7 @@
       const loadBtn = document.createElement("button");
       loadBtn.textContent = "Load";
       loadBtn.onclick = () => addSystemMessage(
-        `Cannot load ${m.id}: ${m.load_error || "runtime support is not ready"}`, true,
+        `Cannot load ${modelDisplayName(m)}: ${m.load_error || "runtime support is not ready"}`, true,
       );
       actions.appendChild(loadBtn);
     } else {
@@ -512,7 +528,7 @@
     const previous = preferredChatModel || modelSelectEl.value;
     modelSelectEl.innerHTML = "";
     if (preferredChatModel && !loaded.some((m) => m.id === preferredChatModel)) {
-      const unavailable = new Option(`${preferredChatModel} · unavailable`, "", true, true);
+      const unavailable = new Option(`${modelDisplayName(preferredChatModel)} · unavailable`, "", true, true);
       unavailable.disabled = true;
       modelSelectEl.add(unavailable);
     } else if (!loaded.length) {
@@ -522,7 +538,7 @@
       const opt = document.createElement("option");
       opt.value = m.id;
       const label = BACKEND_LABELS[m.backend];
-      const displayName = (m.name && m.name !== m.id) ? m.name : m.id;
+      const displayName = modelDisplayName(m);
       const typeLabel = (m.quantization || "").replace("remote opencode.ai (", "").replace(")", "");
       const maxContext = Number(m.max_context_length || m.context_window_tokens || 0);
       const contextLabel = maxContext > 0
@@ -581,9 +597,9 @@
         && !supportTypes.has(m.type)
     );
     if (otherLoaded.length > 0 || targetBackend === "lemonade") {
-      const lines = [`Load ${modelKey}?`];
+      const lines = [`Load ${modelDisplayName(modelKey)}?`];
       if (otherLoaded.length > 0) {
-        const names = otherLoaded.map((m) => m.id).join(", ");
+        const names = otherLoaded.map((m) => modelDisplayName(m)).join(", ");
         lines.push(`The currently loaded chat model will be unloaded: ${names}.`);
       }
       if (targetBackend === "lemonade") {
@@ -1843,7 +1859,8 @@
     }
     if (role === "assistant" && meta.model) {
       const label = BACKEND_LABELS[meta.backend];
-      parts.push(label ? `${meta.model} (${label})` : meta.model);
+      const name = modelDisplayName(meta.model);
+      parts.push(label ? `${name} (${label})` : name);
     }
     if (role === "assistant" && typeof meta.totalTokens === "number") {
       parts.push(`${meta.totalTokens} tokens`);

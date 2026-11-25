@@ -160,6 +160,12 @@ class ServerPathTests(unittest.TestCase):
         self.assertTrue(Path(mcp_tools_client._NODE_BIN).is_file())
         self.assertTrue(Path(mcp_tools_client._PLAYWRIGHT_MCP_CLI).is_file())
 
+    def test_installed_llama_web_directory_is_a_candidate(self):
+        # Fresh installs put the tools in ~/.local/share/llama-web (hyphen), not
+        # the legacy llama_web (underscore) directory or a Hearth install.
+        installed = str(Path.home() / ".local/share/llama-web")
+        self.assertIn(installed, [str(path) for path in mcp_tools_client._DATA_DIRS])
+
 
 if __name__ == "__main__":
     unittest.main()

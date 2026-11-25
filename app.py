@@ -2603,29 +2603,24 @@ def api_set_model_context():
     if entry is None:
         return jsonify({"error": f"{model_id} is not available from {backend}."}), 404
     maximum = entry.get("max_context_length")
-    if backend == "llamacpp":
-        # The model's trained context is much larger than this Vulkan runtime can
-        # actually serve with FP16 KV; cap the saved window to a loadable one.
-        safe = llamacpp.safe_context_limit(model_id)
-        maximum = min(maximum, safe) if isinstance(maximum, int) and not isinstance(maximum, bool) and maximum > 0 else safe
     if 'k2-horizon' in str(model_id).lower() and (not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 32768):
         maximum = 32768
     if (isinstance(maximum, int) and not isinstance(maximum, bool) and maximum > 0
-            and value > maximum):
-        if backend == "llamacpp":
-            native = entry.get("max_context_length")
-            native_note = f" (the model itself supports {native:,})" if isinstance(native, int) and native > maximum else ""
-            return jsonify({"error":
-                            f"This llama.cpp runtime can serve at most {maximum:,} context tokens"
-                            f"{native_note}; a larger window crashes the Vulkan engine."}), 400
+            and value >= maximum):
         return jsonify({"error":
-                        f"{model_id} supports at most {maximum:,} context tokens."}), 400
+                        f"{model_id} supports a maximum of {maximum:,} context tokens; "
+                        "choose a smaller loading context."}), 400
+    warning = None
+    if backend == "llamacpp" and value > llamacpp.safe_context_limit(model_id):
+        warning = (f"Window sizes larger than {llamacpp.safe_context_limit(model_id):,} tokens may "
+                   "not be loadable on this GPU; the model will fall back to the previous configuration.")
     try:
         model_metadata_store.set_model_configured_context(backend, model_id, value)
     except Exception as exc:
         return jsonify({"error": f"Could not save the context length: {exc}"}), 500
     if entry.get("state") != "loaded":
-        return jsonify({"model": model_id, "context_length": value, "reloaded": False})
+        return jsonify({"model": model_id, "context_length": value,
+                        "reloaded": False, **({"warning": warning} if warning else {})})
     # Reuse the normal load route so eviction, NPU locking, and memory checks stay in one
     # place instead of a second, subtly different reload path.
     try:
@@ -2637,7 +2632,8 @@ def api_set_model_context():
         return jsonify({"error": f"Failed to reload {model_id}: {exc}"}), 502
     if response.status_code >= 400:
         return jsonify({"error": data.get("error", f"Failed to reload {model_id}.")}), response.status_code
-    return jsonify({"model": model_id, "context_length": value, "reloaded": True})
+    return jsonify({"model": model_id, "context_length": value, "reloaded": True,
+                    **({"warning": warning} if warning else {})})
 
 
 @app.post("/api/models/context/max")
@@ -5579,6 +5575,8 @@ def _settings_snapshot() -> dict:
         # default). See help_data.opencode_context_settings().
         "opencode_advertise_loaded_context": context_settings["advertise_loaded"],
         "opencode_context_fallback": context_settings["fallback"],
+        "chat_tools_enabled": (settings_store.get("chat_tools_enabled") or "true") == "true",
+        "python_tools_enabled": (settings_store.get("python_tools_enabled") or "true") == "true",
         "web_search_enabled": (settings_store.get("web_search_enabled") or "true") == "true",
         "web_search_mode": settings_store.get("web_search_mode") or "automatic",
         "web_search_max_results": int(settings_store.get("web_search_max_results") or "6"),
@@ -5654,7 +5652,8 @@ def api_update_settings():
         settings_store.set("lemonade_enable_thinking", "true" if body.get("lemonade_enable_thinking") else "false")
 
     for key in (
-        "web_search_enabled", "web_search_direct_urls", "web_search_browser_enabled",
+        "chat_tools_enabled", "python_tools_enabled", "web_search_enabled",
+        "web_search_direct_urls", "web_search_browser_enabled",
     ):
         if key in body:
             settings_store.set(key, "true" if body.get(key) else "false")
@@ -6770,13 +6769,19 @@ def api_chat():
             tools_list = None
             npu_handle = None
             try:
-                if live_lookup_requested or ("python" in chat_tool_mode and web_enabled):
+                chat_tools_enabled = (settings_store.get("chat_tools_enabled") or "true") == "true"
+                python_tools_enabled = (settings_store.get("python_tools_enabled") or "true") == "true"
+                # Python runs locally in the app's virtualenv and needs no web search;
+                # keep it on even when live search is disabled.
+                offer_browser_tools = chat_tools_enabled and live_lookup_requested
+                offer_python_tools = python_tools_enabled and "python" in chat_tool_mode
+                if offer_browser_tools or offer_python_tools:
                     try:
                         all_mcp_tools = mcp_tools_client.ensure_started()
                         prefixes = tuple(
                             prefix for prefix, wanted in (
-                                ("playwright__", live_lookup_requested),
-                                ("python_repl__", "python" in chat_tool_mode),
+                                ("playwright__", offer_browser_tools),
+                                ("python_repl__", offer_python_tools),
                             ) if wanted
                         )
                         tools_list = mcp_tools_client.select_chat_tools(

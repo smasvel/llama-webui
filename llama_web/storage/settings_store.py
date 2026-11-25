@@ -27,6 +27,20 @@ _LEGACY_ENV_SETTINGS = {
 }
 _SECRET_KEYS = {key for key in _LEGACY_ENV_SETTINGS.values() if key.endswith('_api_key')}
 
+# Fresh installs must have chat tools and live search turned on. These are seeded
+# once (INSERT ... DO NOTHING), so an admin who deliberately turns something off
+# is never overridden on a later start.
+DEFAULT_SETTINGS = {
+    'chat_tools_enabled': 'true',
+    'python_tools_enabled': 'true',
+    'web_search_enabled': 'true',
+    'web_search_mode': 'automatic',
+    'web_search_max_results': '6',
+    'web_search_max_pages': '100',
+    'web_search_browser_enabled': 'true',
+    'web_search_direct_urls': 'true',
+}
+
 
 def clear_removed_media_api_credentials() -> None:
     """Delete retired Google media credentials and settings during app startup."""
@@ -44,6 +58,11 @@ def _connect():
 def init_db() -> None:
     with _connect() as conn:
         conn.execute(SCHEMA)
+        for key, value in DEFAULT_SETTINGS.items():
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (%s, %s) "
+                "ON CONFLICT(key) DO NOTHING", (key, value),
+            )
 
 
 def get(key: str, default: str | None = None) -> str | None:

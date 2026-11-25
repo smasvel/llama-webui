@@ -16,7 +16,7 @@ class EngineAssetTests(unittest.TestCase):
         self.assertEqual(release_installer._engine_asset("Darwin", "arm64")[0],
                          f"llama-{release_installer.ENGINE_TAG}-bin-macos-arm64.tar.gz")
         self.assertEqual(release_installer._engine_asset("Linux", "x86_64")[0],
-                         f"llama-{release_installer.ENGINE_TAG}-bin-ubuntu-x64.tar.gz")
+                         f"llama-{release_installer.PRISM_TAG}-bin-ubuntu-vulkan-x64.tar.gz")
 
 
 class EngineConfigurationTests(unittest.TestCase):
@@ -42,6 +42,7 @@ class StartScriptTests(unittest.TestCase):
         root = Path(release_installer.ROOT)
         self.assertTrue((root / "deploy" / "start-llama-web.sh").is_file())
         self.assertTrue((root / "deploy" / "start-llama-web.ps1").is_file())
+        self.assertTrue((root / "deploy" / "install-prism-engine.sh").is_file())
 
 
 if __name__ == "__main__":

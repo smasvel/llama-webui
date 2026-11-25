@@ -88,6 +88,8 @@
 
 
   const settingsDefaultModelEl = document.getElementById("settings-default-model");
+  const settingsChatToolsEnabledEl = document.getElementById("settings-chat-tools-enabled");
+  const settingsPythonToolsEnabledEl = document.getElementById("settings-python-tools-enabled");
   const settingsWebSearchEnabledEl = document.getElementById("settings-web-search-enabled");
   const settingsWebSearchModeEl = document.getElementById("settings-web-search-mode");
   const settingsWebSearchMaxResultsEl = document.getElementById("settings-web-search-max-results");
@@ -211,6 +213,8 @@
 
     savedDefaultModel = data.lan_default_model || "";
     renderDefaultModelSelect();
+    settingsChatToolsEnabledEl.checked = data.chat_tools_enabled !== false;
+    settingsPythonToolsEnabledEl.checked = data.python_tools_enabled !== false;
     settingsWebSearchEnabledEl.checked = data.web_search_enabled !== false;
     settingsWebSearchModeEl.value = data.web_search_mode || "automatic";
     settingsWebSearchMaxResultsEl.value = data.web_search_max_results ?? 6;
@@ -297,6 +301,8 @@
           opencode_compaction_auto: settingsOpencodeCompactionAutoEl.checked,
           opencode_advertise_loaded_context: settingsOpencodeAdvertiseLoadedContextEl.checked,
           opencode_context_fallback: numOrNull(settingsOpencodeContextFallbackEl),
+          chat_tools_enabled: settingsChatToolsEnabledEl.checked,
+          python_tools_enabled: settingsPythonToolsEnabledEl.checked,
           web_search_enabled: settingsWebSearchEnabledEl.checked,
           web_search_mode: settingsWebSearchModeEl.value,
           web_search_max_results: Number(settingsWebSearchMaxResultsEl.value),

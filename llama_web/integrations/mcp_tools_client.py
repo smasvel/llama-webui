@@ -61,14 +61,18 @@ def _first_existing(paths):
     return str(paths[0])
 
 
-_NODE_BIN = _first_existing([
-    Path.home() / ".local/share/llama_web/node/bin/node",
-    Path.home() / ".local/share/hearth/node/bin/node",
-])
-_PLAYWRIGHT_MCP_CLI = _first_existing([
-    Path.home() / ".local/share/llama_web/mcp/node_modules/@playwright/mcp/cli.js",
-    Path.home() / ".local/share/hearth/mcp/node_modules/@playwright/mcp/cli.js",
-])
+# The app installs into ~/.local/share/llama-web (hyphen); older setups used
+# llama_web (underscore), and this machine also has a Hearth install. Check all
+# of them so a fresh llama-web-only install does not silently lose the tools.
+_DATA_DIRS = (
+    Path.home() / ".local/share/llama-web",
+    Path.home() / ".local/share/llama_web",
+    Path.home() / ".local/share/hearth",
+)
+_NODE_BIN = _first_existing([base / "node/bin/node" for base in _DATA_DIRS])
+_PLAYWRIGHT_MCP_CLI = _first_existing(
+    [base / "mcp/node_modules/@playwright/mcp/cli.js" for base in _DATA_DIRS]
+)
 
 _SERVERS = {
     "playwright": StdioServerParameters(

@@ -27,6 +27,11 @@ BACKENDS = {
 ENGINE_TAG = "b12359"
 ENGINE_RELEASE = f"https://github.com/ggml-org/llama.cpp/releases/download/{ENGINE_TAG}"
 
+# PrismML's fork adds PTQ1_0/PQ2_0 ternary quant support and is the default on
+# Linux; it still serves ordinary quants. Pin the release for reproducibility.
+PRISM_TAG = "prism-b12178-03ec600"
+PRISM_RELEASE = f"https://github.com/PrismML-Eng/llama.cpp/releases/download/{PRISM_TAG}"
+
 
 
 def choose_backend(system=None, input_fn=input):
@@ -50,13 +55,13 @@ def _run(command, *, cwd=ROOT):
 
 
 def _engine_asset(system, machine):
-    """Return the official llama.cpp binary asset for this platform."""
+    """Return the binary asset for this platform (Prism Vulkan on Linux)."""
     arm = "arm64" in machine.lower() or "aarch64" in machine.lower()
     if system == "Windows":
         return f"llama-{ENGINE_TAG}-bin-win-cpu-{'arm64' if arm else 'x64'}.zip", ".zip"
     if system == "Darwin":
         return f"llama-{ENGINE_TAG}-bin-macos-{'arm64' if arm else 'x64'}.tar.gz", ".tar.gz"
-    return f"llama-{ENGINE_TAG}-bin-ubuntu-{'arm64' if arm else 'x64'}.tar.gz", ".tar.gz"
+    return f"llama-{PRISM_TAG}-bin-ubuntu-vulkan-{'arm64' if arm else 'x64'}.tar.gz", ".tar.gz"
 
 
 def _find_engine(directory):
@@ -86,6 +91,9 @@ def configure_engine(system, backend_url):
         key_file.write_text(secrets.token_hex(32))
 
     bundled = ROOT / "data" / "q38rocm" / "engine" / "bin" / "llama-server"
+    prism = data / "engine-prism" / "llama-server"
+    if system == "Linux" and prism.exists():
+        bundled = prism
     server = os.environ.get("LLAMA_WEB_ENGINE_BINARY")
     if server and Path(server).exists():
         server = Path(server)
@@ -93,9 +101,10 @@ def configure_engine(system, backend_url):
         server = shutil.which("llama-server") or (bundled if bundled.exists() else None)
     if server is None:
         asset, suffix = _engine_asset(system, platform.machine())
+        release = PRISM_RELEASE if system == "Linux" else ENGINE_RELEASE
         archive = engine_dir / asset
         print(f"Downloading llama.cpp engine ({asset})...")
-        with requests.get(f"{ENGINE_RELEASE}/{asset}", stream=True, timeout=120) as response:
+        with requests.get(f"{release}/{asset}", stream=True, timeout=120) as response:
             response.raise_for_status()
             with archive.open("wb") as handle:
                 for chunk in response.iter_content(1024 * 1024):
