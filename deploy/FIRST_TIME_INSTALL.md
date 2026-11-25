@@ -83,6 +83,12 @@ Models can also be loaded from the Models page, which writes the selected GGUF
 and context size into `server.conf` and restarts the engine. The engine is a
 single-model server: loading one model replaces the currently served one.
 
+Account credentials are stored in PostgreSQL in `user_credentials`, encrypted with a
+key derived from the database password and bound to each user id and credential type.
+Each account has its own opencode.ai API key and personal Caddy LAN token; other users
+cannot read them. On upgrade, legacy plaintext tokens and the old global opencode.ai key
+are migrated into that table once and removed from their old locations.
+
 Model metadata (name, publisher, size, quantisation and native context) is stored
 in PostgreSQL in `local_model_metadata`, not read from GGUF files at request time.
 On first start after upgrading, existing GGUFs are imported into that table once;

@@ -132,6 +132,8 @@ and operational details.
 
 Linux systemd installs use:
 
+- Per-user credentials (opencode.ai API key and personal Caddy LAN token) live encrypted
+  in the `user_credentials` table, scoped to each account and never shown to others;
 - `~/.config/llama-web/server.conf` — `LLAMA_SERVER`, `LLAMA_MODEL`, `LLAMA_ARGS`,
   `LLAMA_ARG_CTX_SIZE`;
 - `~/.config/llama-web/engine-key` — local engine bearer token;

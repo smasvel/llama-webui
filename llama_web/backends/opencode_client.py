@@ -74,12 +74,38 @@ def _models_url() -> str:
     return root + ("/go/v1/models" if plan() == "go" else "/v1/models")
 
 
-def api_key() -> str:
-    return settings_store.get("opencode_api_key") or ""
+def _any_configured_key() -> str:
+    """A key for read-only catalog discovery when no specific user is in context."""
+    from llama_web.storage import user_credentials, users_store
+    legacy = settings_store.get("opencode_api_key")
+    if legacy:
+        return legacy
+    try:
+        for row in users_store.list_users(page=1, per_page=100)["users"]:
+            value = user_credentials.get(row["id"], user_credentials.OPENCODE_KEY)
+            if value:
+                return value
+    except Exception:
+        pass
+    return ""
 
 
-def _headers() -> dict[str, str]:
-    key = api_key()
+def api_key(user_id: str | None = None) -> str:
+    """A specific user's encrypted key for requests, or any configured key for
+    shared catalog discovery. Chat traffic never silently borrows another user's key."""
+    from llama_web.storage import user_credentials
+    if user_id:
+        return user_credentials.get(user_id, user_credentials.OPENCODE_KEY) or ""
+    return _any_configured_key()
+
+
+def set_api_key(user_id: str, value: str | None) -> None:
+    from llama_web.storage import user_credentials
+    user_credentials.set(user_id, user_credentials.OPENCODE_KEY, value)
+
+
+def _headers(user_id: str | None = None) -> dict[str, str]:
+    key = api_key(user_id)
     headers = {"User-Agent": _USER_AGENT}
     if key:
         headers["Authorization"] = f"Bearer {key}"
@@ -113,20 +139,20 @@ _models_cache: dict = {'loaded_at': 0.0, 'models': []}
 _models_cache_lock = threading.Lock()
 
 
-def list_models() -> list[dict]:
+def list_models(user_id: str | None = None) -> list[dict]:
     """Chat models served by opencode.ai — requires an API key. Without one there is
     nothing to reach, so return an empty list (a backend being unconfigured is
     normal, not an error); with a key, an upstream failure raises so the UI can
     show the cause. Results are cached for a minute: listing is called on every
     help/config snapshot build and must not turn into per-request upstream traffic."""
-    if not api_key():
+    if not api_key(user_id):
         return []
     with _models_cache_lock:
         cached, at = _models_cache['models'], _models_cache['loaded_at']
         if cached and time.monotonic() - at < _MODELS_CACHE_SECONDS:
             return copy.deepcopy(cached)
     try:
-        response = requests.get(_models_url(), headers=_headers(), timeout=15)
+        response = requests.get(_models_url(), headers=_headers(user_id), timeout=15)
         if response.status_code >= 400:
             raise OpenCodeError(_http_error(response))
         items = response.json().get("data", [])
@@ -166,12 +192,12 @@ def list_models() -> list[dict]:
     return models
 
 
-def verify_model(model: str) -> None:
+def verify_model(model: str, user_id: str | None = None) -> None:
     if not owns_model(model):
         raise OpenCodeError(f"Not an opencode.ai model id: {model}")
-    if not api_key():
+    if not api_key(user_id):
         raise OpenCodeError(
-            "No opencode.ai API key is configured. "
+            "No opencode.ai API key is configured for this account. "
             "Set it in Settings before selecting an opencode.ai model.")
     if model not in {item["id"] for item in list_models()}:
         raise OpenCodeError(
@@ -192,6 +218,7 @@ def chat_stream(
     tools: list[dict] | None = None,
     session_id: str | None = None,
     parallel_tool_calls: bool | None = None,
+    user_id: str | None = None,
 ):
     payload = {
         "model": _served_id(model),
@@ -208,7 +235,7 @@ def chat_stream(
         if parallel_tool_calls is not None:
             payload["parallel_tool_calls"] = parallel_tool_calls
 
-    headers = _headers()
+    headers = _headers(user_id)
     # The Go surface requires a stable per-conversation routing header; without it
     # requests fail with HTTP 400 "missing x-opencode-session and cannot be routed".
     headers['x-opencode-session'] = (session_id or uuid.uuid4().hex)[:120]

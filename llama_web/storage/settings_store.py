@@ -72,7 +72,12 @@ def get(key: str, default: str | None = None) -> str | None:
         return default
     value = row['value']
     if key in _SECRET_KEYS and value.startswith('v1:'):
-        return secret_store.decrypt_setting(value)
+        try:
+            return secret_store.decrypt_setting(value)
+        except Exception:
+            # A rotated database password or a corrupt legacy row must not take
+            # down the app; treat the unreadable secret as absent.
+            return default
     return value
 
 

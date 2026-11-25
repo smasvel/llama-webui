@@ -66,10 +66,8 @@ def init_db() -> None:
         )
         if not has_agent_permission:
             conn.execute("UPDATE users SET agentic_workflow_enabled = (role = 'admin')")
-        for row in conn.execute("SELECT id FROM users WHERE caddy_token IS NULL").fetchall():
-            conn.execute(
-                "UPDATE users SET caddy_token = %s WHERE id = %s", (_new_caddy_token(), row["id"])
-            )
+        # Personal Caddy tokens now live encrypted in user_credentials; the
+        # legacy column is kept only so old databases can be migrated in place.
 
 
 def new_id() -> str:
@@ -184,17 +182,17 @@ def username_exists(username: str) -> bool:
 
 def _insert_user(username: str, password_hash: str, role: str, created_at: float,
                  agentic_workflow_enabled: bool | None = None) -> dict:
+    from llama_web.storage import user_credentials
     user_id = new_id()
-    caddy_token = _new_caddy_token()
     if agentic_workflow_enabled is None:
         agentic_workflow_enabled = role == "admin"
     with _connect() as conn:
         conn.execute(
             "INSERT INTO users (id, username, password_hash, role, created_at, caddy_token, "
-            "agentic_workflow_enabled) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (user_id, username, password_hash, role, created_at, caddy_token,
-             agentic_workflow_enabled),
+            "agentic_workflow_enabled) VALUES (%s, %s, %s, %s, %s, NULL, %s)",
+            (user_id, username, password_hash, role, created_at, agentic_workflow_enabled),
         )
+    caddy_token = user_credentials.ensure_caddy_token(user_id)
     return {
         "id": user_id, "username": username, "role": role, "created_at": created_at,
         "caddy_token": caddy_token, "agentic_workflow_enabled": agentic_workflow_enabled,
@@ -212,9 +210,9 @@ def create_user(username: str, password: str, role: str = "user",
 def create_first_admin(username: str, password: str) -> dict | None:
     """Atomically create the initial web-admin account, only while users is empty."""
     password_hash = generate_password_hash(password)
+    from llama_web.storage import user_credentials
     user_id = new_id()
     created_at = time.time()
-    caddy_token = _new_caddy_token()
     with _connect() as conn:
         # Serialize simultaneous first visits so only one browser can claim setup.
         conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (74192610, 2))
@@ -222,9 +220,10 @@ def create_first_admin(username: str, password: str) -> dict | None:
             return None
         conn.execute(
             "INSERT INTO users (id, username, password_hash, role, created_at, caddy_token, "
-            "agentic_workflow_enabled) VALUES (%s, %s, %s, 'admin', %s, %s, TRUE)",
-            (user_id, username, password_hash, created_at, caddy_token),
+            "agentic_workflow_enabled) VALUES (%s, %s, %s, 'admin', %s, NULL, TRUE)",
+            (user_id, username, password_hash, created_at),
         )
+    caddy_token = user_credentials.ensure_caddy_token(user_id)
     return {
         "id": user_id, "username": username, "role": "admin", "created_at": created_at,
         "caddy_token": caddy_token, "agentic_workflow_enabled": True,
@@ -266,9 +265,10 @@ def set_password(user_id: str, new_password: str) -> None:
 
 
 def get_caddy_token(user_id: str) -> str | None:
-    with _connect() as conn:
-        row = conn.execute("SELECT caddy_token FROM users WHERE id = %s", (user_id,)).fetchone()
-        return row["caddy_token"] if row else None
+    from llama_web.storage import user_credentials
+    if get_user_by_id(user_id) is None:
+        return None
+    return user_credentials.ensure_caddy_token(user_id)
 
 
 def regenerate_caddy_token(user_id: str) -> str | None:
@@ -276,11 +276,11 @@ def regenerate_caddy_token(user_id: str) -> str | None:
     the next time an admin actually copies this new one in and reloads Caddy - see
     app.py's _caddy_user_snippet) and issues a new one. Returns None if the user doesn't
     exist, same not-found contract as set_password's caller checks."""
+    from llama_web.storage import user_credentials
     if get_user_by_id(user_id) is None:
         return None
     token = _new_caddy_token()
-    with _connect() as conn:
-        conn.execute("UPDATE users SET caddy_token = %s WHERE id = %s", (token, user_id))
+    user_credentials.set(user_id, user_credentials.CADDY_TOKEN, token)
     return token
 
 

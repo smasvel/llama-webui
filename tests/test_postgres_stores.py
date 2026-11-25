@@ -43,7 +43,11 @@ class PostgreSQLStoreTests(unittest.TestCase):
         self.assertTrue(stored['password_hash'].startswith('scrypt:'))
         self.assertEqual(stored['role'], 'admin')
         self.assertIsInstance(stored['created_at'], float)
-        self.assertTrue(stored['caddy_token'])
+        from llama_web.storage import user_credentials
+        # The legacy plaintext column is no longer used; the personal token is
+        # encrypted in user_credentials.
+        self.assertIsNone(stored['caddy_token'])
+        self.assertTrue(user_credentials.get(user['id'], user_credentials.CADDY_TOKEN))
         self.assertTrue(stored['agentic_workflow_enabled'])
         self.assertNotIn('password_hash', users_store.get_user_by_id(user['id']))
         listed = users_store.list_users()['users'][0]

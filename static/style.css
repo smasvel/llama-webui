@@ -1248,10 +1248,23 @@ h6.msg-heading { font-size: 14px; color: var(--text-dim); text-transform: upperc
 
 .code-modal-footer {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
+}
+.code-modal-footer .composer-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 #chat-input:focus { outline: none; border-color: var(--accent); }

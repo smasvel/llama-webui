@@ -175,8 +175,11 @@ class _ModelProxyHandler(BaseHTTPRequestHandler):
             if plan not in ('go', 'payg'):
                 plan = 'go' if '/go/' in str(proxy.get('base_url') or '') else 'payg'
             try:
-                from llama_web.storage import settings_store
+                from llama_web.storage import settings_store, user_credentials
+                owner_key = (user_credentials.get(proxy.get('owner_id') or '',
+                                                  user_credentials.OPENCODE_KEY) or '')
                 key = (_saved_opencode_auth_key(plan)
+                       or owner_key
                        or settings_store.get('opencode_api_key') or key or '').strip()
             except Exception:
                 key = _saved_opencode_auth_key(plan) or key

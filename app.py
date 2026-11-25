@@ -76,6 +76,7 @@ from llama_web.core import security_scan
 from llama_web.storage import settings_store
 from llama_web.storage import secret_store
 from llama_web.storage import users_store
+from llama_web.storage import user_credentials
 from llama_web.integrations import page_scraper, web_search_client as web_search
 from llama_web.integrations import historical_chart
 from llama_web.core import generation_guard
@@ -128,6 +129,8 @@ try:
 except Exception:
     pass
 settings_store.migrate_legacy_environment()
+user_credentials.init_db()
+user_credentials.migrate_legacy_secrets()
 model_resource_warnings.init_db()
 kobold.initialize_registry()
 vllm.initialize_registry()
@@ -2314,7 +2317,11 @@ def _collect_completion(messages: list[dict], model: str, temperature: float = 0
     npu_handle = _claim_selected_npu(backend, model) if is_npu else None
     parts: list[str] = []
     try:
-        options = {"session_id": session_id} if backend is zen and session_id else {}
+        options = {}
+        if backend is zen:
+            if session_id:
+                options["session_id"] = session_id
+            options["user_id"] = session.get("user_id")
         for line in backend.chat_stream(messages, model, temperature=temperature,
                                         max_tokens=max_tokens, **options):
             if not line.startswith("data:"):
@@ -2432,7 +2439,7 @@ def api_list_models():
     # opencode.ai — remote hosted models, shown on the separate Online tab. An
     # unconfigured API key is normal and simply yields an empty online group.
     try:
-        zen_models = zen.list_models()
+        zen_models = zen.list_models(session.get("user_id"))
     except Exception:
         zen_models = []
     for m in zen_models:
@@ -2706,7 +2713,7 @@ def _test_model_inventory():
         return api_list_models.__wrapped__().get_json()['models']
 
 
-def _test_load_model(target):
+def _test_load_model(target, owner_id: str | None = None):
     # Reuse the existing serialized load route and its memory/NPU eviction rules.
     # Authorization was checked on the HTTP start endpoint; this is internal work.
     if target['backend'] == 'opencode':
@@ -2715,7 +2722,8 @@ def _test_load_model(target):
         # handoff certification entirely.
         model_id = target['id']
         # Agents store providerID separately; model tests use namespaced catalog IDs.
-        zen.verify_model(model_id if zen.owns_model(model_id) else 'opencode/' + model_id)
+        zen.verify_model(model_id if zen.owns_model(model_id) else 'opencode/' + model_id,
+                         owner_id)
         return
     _model_test_context.active = True
     try:
@@ -2839,7 +2847,8 @@ def _test_connection(target):
         # completions use the documented OpenAI-shaped path.
         model = zen._served_id(model)
         base = zen.base_url().rstrip('/')
-    key = client.api_key()
+    key = (zen.api_key(session.get("user_id")) if backend == 'opencode'
+           else client.api_key())
     headers = {'X-llama_web-Client': 'model-tests'}
     if backend == 'opencode':
         # Go requires a stable per-session routing header even for test traffic.
@@ -2882,7 +2891,7 @@ def _prepare_agent_model(job):
         model = job['model']
         backend = _agent_model_backend(model.get('providerID'), model.get('id'))
         if backend == 'opencode':
-            _test_load_model({'backend': 'opencode', 'id': model['id']})
+            _test_load_model({'backend': 'opencode', 'id': model['id']}, job.get('owner'))
             return
         # _test_load_model unloads every active reasoning model before loading its
         # target. For an agent continuing with a healthy model, that eviction is
@@ -4472,7 +4481,7 @@ def api_load_model():
         return jsonify({"error": "'model' is required"}), 400
     if zen.owns_model(model_key):
         try:
-            zen.verify_model(model_key)
+            zen.verify_model(model_key, session.get("user_id"))
         except zen.OpenCodeError as exc:
             return jsonify({"error": str(exc)}), 502
         return jsonify({"ok": True, "unloaded": [], "externally_managed": True})
@@ -5586,7 +5595,7 @@ def _settings_snapshot() -> dict:
         "lemonade_api_key": lemonade.api_key() or "",
         "vllm_base_url": vllm.base_url(),
         "vllm_api_key": vllm.api_key() or "",
-        "opencode_api_key": zen.api_key() or "",
+        "opencode_api_key": zen.api_key(session.get("user_id")) or "",
         "opencode_api_base_url": (settings_store.get("opencode_api_base_url") or ""),
         "opencode_api_plan": zen.plan(),
         "kobold_base_url": kobold.base_url(),
@@ -5676,12 +5685,12 @@ def api_update_settings():
             # submit from a tab opened before the key existed) must not silently
             # erase a stored credential. Removal is explicit via opencode_api_clear.
             if (body.get(key) or "").strip():
-                settings_store.set(key, (body.get(key) or "").strip())
+                zen.set_api_key(session["user_id"], (body.get(key) or "").strip())
             continue
         if key in body:
             settings_store.set(key, (body.get(key) or "").strip())
     if body.get("opencode_api_clear") is True:
-        settings_store.set("opencode_api_key", None)
+        zen.set_api_key(session["user_id"], None)
     # Checkbox-backed boolean arrives as JSON true/false, not a string — stored as "true"/
     # "false" text (settings_store is a plain string key/value store) so _settings_snapshot's
     # `(... or "true") == "true"` check stays a simple or-else-default check.
@@ -5907,6 +5916,26 @@ def api_reset_password(user_id):
     users_store.set_password(user_id, new_password)
     users_store.record_auth_event(target["username"], "password_changed", True, user_id=user_id, remote_addr=request.remote_addr, actor_username=session.get("username"))
     return jsonify({"ok": True})
+
+
+@app.get("/api/users/<user_id>/opencode-key")
+@login_required
+def api_get_opencode_key(user_id):
+    """Signed-in users may read only their own stored opencode.ai key."""
+    if user_id != session["user_id"]:
+        return jsonify({"error": "Account not found."}), 404
+    return jsonify({"has_key": bool(zen.api_key(user_id))})
+
+
+@app.post("/api/users/<user_id>/opencode-key")
+@login_required
+def api_set_opencode_key(user_id):
+    if user_id != session["user_id"]:
+        return jsonify({"error": "Account not found."}), 404
+    body = request.get_json(silent=True) or {}
+    value = str(body.get("api_key") or "").strip()
+    zen.set_api_key(user_id, value or None)
+    return jsonify({"ok": True, "has_key": bool(value)})
 
 
 @app.get("/api/users/<user_id>/caddy-token")
@@ -6909,12 +6938,15 @@ def api_chat():
                         break
                     round_tool_calls: dict[int, dict] = {}
                     finish_reason = None
+                    stream_options = dict(extra_kwargs)
+                    if backend is zen:
+                        stream_options["user_id"] = user_id
                     backend_lines = backend.chat_stream(
                         loop_messages,
                         model,
                         temperature=body.get("temperature", 0.7),
                         max_tokens=max_tokens,
-                        **extra_kwargs,
+                        **stream_options,
                     )
                     backend_lines = chat_jobs.cancelable_lines(backend_lines, cancel_event)
                     if backend is llamacpp:
@@ -7330,7 +7362,9 @@ def _restore_default_model() -> None:
         if backend is zen:
             # Remote opencode.ai models do not consume this machine's resources;
             # selecting them must not evict a useful local model during startup.
-            zen.verify_model(model)
+            admin_rows = users_store.list_users(page=1, per_page=100)["users"]
+            admin_id = next((row["id"] for row in admin_rows if row.get("role") == "admin"), None)
+            zen.verify_model(model, admin_id)
             print(f"Startup model: verified {backend_name}/{model}", flush=True)
             return
         with _reasoning_model_load_lock:

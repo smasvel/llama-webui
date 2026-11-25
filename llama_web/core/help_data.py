@@ -395,6 +395,25 @@ def build_continue_yaml(ip, token, ports, chat_by_be, embed_models, network_labe
     return "\n".join(lines)
 
 
+def _opencode_inventory() -> list[dict]:
+    """Discover hosted model ids with an admin's key; the Help config itself
+    deliberately contains no real credential."""
+    from llama_web.storage import users_store
+    discovered = zen.list_models()
+    if discovered:
+        return discovered
+    try:
+        admins = [row for row in users_store.list_users(page=1, per_page=100)['users']
+                  if row.get('role') == 'admin']
+        for row in admins:
+            models = zen.list_models(row['id'])
+            if models:
+                return models
+    except Exception:
+        pass
+    return []
+
+
 def build_opencode_config(ip, token, ports, chat_by_be, loaded_by_be, default_override=None, network_label="LAN", ctx_by_model=None) -> str:
     # network_label: see build_continue_yaml's docstring comment — same reasoning, cosmetic only.
     # ctx_by_model: {(backend, model_id): context_to_advertise} resolved by build() from the
@@ -428,15 +447,14 @@ def build_opencode_config(ip, token, ports, chat_by_be, loaded_by_be, default_ov
             "options": options,
             "models": models,
         }
-    # OpenCode Console (opencode.ai) is remote and paid per request — it is deliberately
-    # NOT routed through Caddy like the LAN backends and never auto-selected as the
-    # default model. The admin's Console key goes directly into the provider block so a
-    # generated config works as-is on the desktop and inside agent containers; the agentic
-    # framework re-points the baseURL at its own per-task relay with the same key.
-    console_key = zen.api_key()
-    if console_key:
+    # OpenCode Console (opencode.ai) is remote and paid per request. API keys are
+    # per-user encrypted credentials now, so this shared, cached Help config must
+    # never contain a real key: each user pastes their own into the placeholder.
+    # Agent containers resolve the task owner's key through the host relay.
+    console_inventory = _opencode_inventory()
+    if console_inventory:
         console_models = {}
-        for item in zen.list_models():
+        for item in console_inventory:
             context = item.get("configured_context_length") or item.get("max_context_length")
             if not (isinstance(context, int) and context > 0):
                 # Conservative floor: Console models are typically >>65K; the model-list
@@ -454,7 +472,7 @@ def build_opencode_config(ip, token, ports, chat_by_be, loaded_by_be, default_ov
                 "name": "opencode.ai (hosted models)",
                 "options": {
                     "baseURL": zen.base_url().rstrip("/") + "/v1",
-                    "apiKey": console_key,
+                    "apiKey": "<your opencode.ai API key>",
                 },
                 "models": console_models,
             }
@@ -505,6 +523,10 @@ def build_opencode_jsonc(host: str, app_port: int, api_key: str,
                          network_label: str = "local") -> str:
     """Return a copyable OpenCode JSONC config for llama-web's /v1 gateway."""
     models = _all_models()
+    if not any(m.get("backend") == "opencode" for m in models):
+        for item in _opencode_inventory():
+            models.append({**item, "backend": "opencode", "type": "llm",
+                           "id": item.get("id") or "", "name": item.get("name") or item.get("id")})
     chat = [m for m in models if m.get("type") not in _NON_CHAT]
     entries = {}
     for m in chat:

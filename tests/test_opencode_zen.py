@@ -132,6 +132,11 @@ class OpenCodeClientTests(unittest.TestCase):
         self.assertTrue(zen.owns_model("opencode/glm-5.3"))
         self.assertFalse(zen.owns_model("glm-5.3"))
 
+    @patch.object(zen, "api_key", return_value="catalog-key")
+    @patch.object(zen, "list_models", return_value=[{"id": "opencode/hy4-flash-free"}])
+    def test_verify_without_user_uses_shared_catalog_key(self, _models, _key):
+        zen.verify_model("opencode/hy4-flash-free")
+
     @patch.object(zen, "api_key", return_value="")
     def test_verify_requires_a_key_before_anything_else(self, _key):
         with self.assertRaises(zen.OpenCodeError) as ctx:

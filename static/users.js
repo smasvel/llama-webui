@@ -17,6 +17,7 @@
   const caddySnippetCopy = document.getElementById("caddy-snippet-copy");
 
   let currentPage = 1;
+  let currentUserId = null;
   const perPage = 20;
 
   function escapeHtml(str) {
@@ -86,7 +87,9 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "failed to list users");
       currentPage = data.page;
-      renderUsersList(data.users || [], data.current_user_id);
+      currentUserId = data.current_user_id || null;
+      renderUsersList(data.users || [], currentUserId);
+      refreshOpencodeKeyStatus();
       renderPagination(data);
     } catch (err) {
       usersListEl.innerHTML = `<p class="hint">Could not load users.<br>${escapeHtml(err.message)}</p>`;
@@ -303,6 +306,43 @@
       addSystemMessage(`Failed to add user: ${err.message}`, true);
     } finally {
       addUserBtn.disabled = false;
+    }
+  });
+
+  async function refreshOpencodeKeyStatus() {
+    const statusEl = document.getElementById("personal-opencode-status");
+    if (!statusEl || !currentUserId) return;
+    try {
+      const res = await fetch(`/api/users/${currentUserId}/opencode-key`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "failed to read key status");
+      statusEl.textContent = data.has_key
+        ? "A key is stored for your account. Leave the field empty to keep it."
+        : "No key stored for your account yet.";
+    } catch (err) {
+      statusEl.textContent = `Could not read key status: ${err.message}`;
+    }
+  }
+
+  document.getElementById("personal-opencode-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!currentUserId) return;
+    const statusEl = document.getElementById("personal-opencode-status");
+    const inputEl = document.getElementById("personal-opencode-key");
+    const value = inputEl.value.trim();
+    try {
+      const res = await fetch(`/api/users/${currentUserId}/opencode-key`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({api_key: value}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "failed to save key");
+      inputEl.value = "";
+      await refreshOpencodeKeyStatus();
+      addSystemMessage(data.has_key ? "API key stored securely for your account." : "Stored API key removed.");
+    } catch (err) {
+      if (statusEl) statusEl.textContent = `Could not save key: ${err.message}`;
     }
   });
 

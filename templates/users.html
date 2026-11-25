@@ -35,8 +35,9 @@
         <div class="console-head">
           <h1>Users</h1>
           <p class="hint">
-            Administrators can create accounts and manage agent access. Password changes
-            and personal LAN tokens are available only to the signed-in account owner.
+            Administrators can create accounts and manage agent access. Password changes,
+            personal LAN tokens and opencode.ai API keys are available only to the signed-in
+            account owner.
           </p>
         </div>
 
@@ -76,6 +77,20 @@
                 <button id="auth-events-next" class="panel-btn" type="button">Next &rarr;</button>
               </div>
             </div>
+          </div>
+
+          <div id="personal-opencode-card" class="console-card span-all">
+            <h2>Your opencode.ai API key</h2>
+            <p class="hint">
+              Stored encrypted in PostgreSQL, scoped to your account only, and never shown to
+              other users. Leaving the field empty and saving removes the stored key.
+            </p>
+            <form id="personal-opencode-form" class="download-form">
+              <input id="personal-opencode-key" class="panel-input" type="password"
+                     autocomplete="off" placeholder="Paste your opencode.ai API key" />
+              <button class="panel-btn" type="submit">Save key</button>
+            </form>
+            <p class="hint" id="personal-opencode-status" aria-live="polite"></p>
           </div>
 
           <div id="caddy-snippet-card" class="console-card span-all hidden">

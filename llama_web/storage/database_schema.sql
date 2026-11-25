@@ -176,6 +176,16 @@ COMMENT ON TABLE model_registry IS
 COMMENT ON COLUMN model_registry.payload IS
     'Backend-specific model metadata such as local model path, context length, or dtype.';
 
+CREATE TABLE IF NOT EXISTS user_credentials (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    encrypted_value TEXT NOT NULL,
+    updated_at DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (user_id, kind)
+);
+COMMENT ON TABLE user_credentials IS
+    'Encrypted per-user API credentials (opencode.ai, Caddy); values are only decrypted for the owning user.';
+
 CREATE TABLE IF NOT EXISTS local_model_metadata (
     model_id TEXT PRIMARY KEY,
     path TEXT NOT NULL,

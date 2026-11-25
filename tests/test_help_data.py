@@ -178,14 +178,14 @@ class OpenCodeConsoleConfigTests(unittest.TestCase):
         {"id": "opencode/glm-5.3", "name": "GLM 5.3",
          "configured_context_length": 200000, "output_tokens_limit": 32768}])
     @patch.object(help_data.zen, "api_key", return_value="test-key")
-    def test_console_provider_embeds_key_windows_and_output(self, _key, _models, _setting):
+    def test_console_provider_uses_key_placeholder_windows_and_output(self, _key, _models, _setting):
         cfg = json.loads(help_data.build_opencode_config(
             "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
             {"llamacpp": []}, {}))
         provider = cfg["provider"]["opencode"]
         self.assertEqual(provider["options"]["baseURL"],
                          "https://opencode.ai/inference/openai/v1")
-        self.assertEqual(provider["options"]["apiKey"], "test-key")
+        self.assertEqual(provider["options"]["apiKey"], "<your opencode.ai API key>")
         self.assertEqual(provider["models"]["glm-5.3"]["limit"],
                          {"context": 200000, "output": 32768})
 

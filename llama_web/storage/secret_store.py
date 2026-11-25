@@ -55,6 +55,20 @@ def decrypt_setting(value: str) -> str:
     return _decrypt(value, _encryption_key(), b'llama_web:setting-secret:v1')
 
 
+def _user_aad(user_id: str, kind: str) -> bytes:
+    # Binding the ciphertext to both the owner and the credential type means a
+    # row cannot be copied to another account (or another purpose) and decrypted.
+    return f'llama_web:user-credential:v1:{user_id}:{kind}'.encode()
+
+
+def encrypt_user_secret(user_id: str, kind: str, value: str) -> str:
+    return _encrypt(value, _encryption_key(), _user_aad(user_id, kind))
+
+
+def decrypt_user_secret(user_id: str, kind: str, value: str) -> str:
+    return _decrypt(value, _encryption_key(), _user_aad(user_id, kind))
+
+
 def get_or_create_flask_key(legacy_key: str | None = None) -> str:
     """Return the stable session key, migrating a legacy environment value once."""
     key = _encryption_key()

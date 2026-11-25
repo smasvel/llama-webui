@@ -17,14 +17,17 @@ class OpenCodeKeyStorageTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(database.temporary_schema())
         settings_store.init_db()
+        from llama_web.storage import user_credentials
+        user_credentials.init_db()
         import app
         self.app = app
+        self.user_id = app.users_store.create_user('settings-admin', 'password123', 'admin')['id']
         self.stack.enter_context(patch.object(
             app.users_store, 'get_user_by_id',
             side_effect=lambda uid: {'id': uid, 'username': uid, 'role': 'admin'}))
         self.client = app.app.test_client()
         with self.client.session_transaction() as session:
-            session.update(logged_in=True, user_id='admin', username='admin', role='admin',
+            session.update(logged_in=True, user_id=self.user_id, username='admin', role='admin',
                            login_csrf_token='token', last_activity=time.time())
         self.headers = {'X-CSRF-Token': 'token'}
         # The intended upstream is not reachable from tests; the storage assertions
@@ -35,11 +38,14 @@ class OpenCodeKeyStorageTests(unittest.TestCase):
     def _submit(self, payload):
         return self.client.post('/api/settings', json=payload, headers=self.headers)
 
-    def _raw_db_value(self):
+    def _raw_db_value(self, user_id=None):
         from llama_web.storage import database
         with database.connect() as conn:
-            row = conn.execute("SELECT value FROM settings WHERE key = 'opencode_api_key'").fetchone()
-        return row['value'] if row else None
+            row = conn.execute(
+                "SELECT encrypted_value FROM user_credentials WHERE user_id = %s AND kind = 'opencode_api_key'",
+                (user_id or self.user_id,),
+            ).fetchone()
+        return row['encrypted_value'] if row else None
 
     def test_key_is_configured_and_persisted_encrypted(self):
         import app
@@ -50,8 +56,7 @@ class OpenCodeKeyStorageTests(unittest.TestCase):
         stored = self._raw_db_value()
         self.assertTrue(stored.startswith('v1:'), 'the key must never be written in plaintext')
         self.assertNotIn('sk-live-zen-key', stored)
-        with patch.object(self.app.zen, 'api_key', return_value=settings_store.get('opencode_api_key')):
-            snapshot = self.client.get('/api/settings').get_json()
+        snapshot = self.client.get('/api/settings').get_json()
         self.assertEqual(snapshot['opencode_api_key'], 'sk-live-zen-key')
 
     def test_key_only_written_when_the_panel_sends_it(self):
@@ -71,7 +76,10 @@ class OpenCodeKeyStorageTests(unittest.TestCase):
         self._submit({'opencode_api_key': 'sk-live-zen-key'})
         self._submit({'opencode_api_key': '', 'opencode_api_base_url': ''})
         self.assertTrue(self._raw_db_value())
-        self.assertEqual(settings_store.get('opencode_api_key'), 'sk-live-zen-key')
+        from llama_web.storage import user_credentials
+        self.assertEqual(user_credentials.get(self.user_id, user_credentials.OPENCODE_KEY), 'sk-live-zen-key')
+        self.assertEqual(self.app.zen.api_key(self.user_id), 'sk-live-zen-key')
+        self.assertFalse(self.app.zen.api_key('someone-else'))
         self.assertIsNone(settings_store.get('opencode_api_base_url'))
 
     def test_unknown_test_target_is_rejected(self):
