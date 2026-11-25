@@ -682,12 +682,13 @@
       const value=modelValue(m);
       for(const select of [el('agent-model'),el('agent-resume-model'),el('agent-edit-model')].filter(Boolean)) {
         let option=[...select.options].find(item=>item.value===value);
-        if(!option) { option=node('option',m.name,select); option.value=value; }
-        option.textContent=m.name+(m.usable === false ? ' — needs larger context' : '');
+        const label=m.name || m.id || value;
+        if(!option) { option=node('option',label,select); option.value=value; }
+        option.textContent=label+(m.usable === false ? ' — needs larger context' : '');
         option.disabled=m.usable === false; option.title=m.reason || '';
         if(select===el('agent-edit-model') && task?.model && value===modelValue(task.model)) {
           option.disabled=false;
-          if(m.usable===false)option.textContent=m.name+' — saved model (needs larger context)';
+          if(m.usable===false)option.textContent=label+' — saved model (needs larger context)';
           delete option.dataset.savedModel;
         }
       }

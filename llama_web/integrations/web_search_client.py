@@ -77,7 +77,7 @@ def filter_navigation_results(query: str, results: list[dict], limit: int | None
             continue
         if _AD_LABEL_RE.search(title) or _AD_LABEL_RE.search(body):
             continue
-        if not page_scraper.is_allowed_navigation_url(href):
+        if not page_scraper.is_allowed_navigation_url(href) or page_scraper.is_blocked(href):
             continue
         host = (urlparse(href).hostname or "").replace("www.", "")
         candidate_terms = _search_terms(f"{title} {body}")
@@ -817,7 +817,8 @@ def fetch_urls_directly(urls: list[str], max_chars: int = 3000, screenshot_dir=N
     Playwright isn't installed or a given page fails to render, same fail-soft contract
     as enrich_with_full_text; callers should check for any non-empty full_text before
     treating this as a successful browse."""
-    urls = [url for url in urls if page_scraper.is_allowed_navigation_url(url)]
+    urls = [url for url in urls
+            if page_scraper.is_allowed_navigation_url(url) and not page_scraper.is_blocked(url)]
     pages = (
         page_scraper.fetch_pages(
             urls, timeout=8.0, screenshot_dir=screenshot_dir,
@@ -847,8 +848,13 @@ def enrich_with_full_text(results: list[dict], max_fetch: int = 3, max_chars: in
     raises, same fail-soft contract as the rest of this module."""
     # Re-score immediately before navigation as callers may pass results from a
     # specialized search route. Only organic pages with query evidence are opened.
-    targets = filter_navigation_results(query or "", results, limit=max_fetch)
+    # Pick extra candidates so a site that refuses access can simply be skipped
+    # in favour of the next result instead of being retried or blocking the lookup.
+    targets = filter_navigation_results(query or "", results, limit=max_fetch * 2)
     if not targets or not page_scraper.available():
+        return results
+    targets = [target for target in targets if not page_scraper.is_blocked(target.get("href", ""))][:max_fetch]
+    if not targets:
         return results
     urls = [r.get("href", "") for r in targets if r.get("href")]
     pages = page_scraper.fetch_pages(
@@ -860,7 +866,11 @@ def enrich_with_full_text(results: list[dict], max_fetch: int = 3, max_chars: in
     enriched = []
     for r in results:
         r = dict(r)
-        page = pages.get(r.get("href", ""))
+        href = r.get("href", "")
+        page = pages.get(href)
+        if not page and page_scraper.is_blocked(href):
+            # Refused during this lookup: drop it, never retry it here.
+            r["blocked"] = True
         if page and page["text"]:
             r["full_text"] = page["text"][:max_chars]
         if page and page.get("screenshot"):
@@ -887,6 +897,9 @@ def format_for_context(query: str, results: list[dict]) -> str | None:
     any_price_hints = False
     any_full_text = False
     for r in results:
+        if r.get("blocked") or page_scraper.is_blocked(r.get("href") or ""):
+            # The site declined access; skip it rather than quoting or retrying it.
+            continue
         title = r.get("title") or r.get("href") or "Untitled"
         href = r.get("href") or ""
         full_text = (r.get("full_text") or "").strip()
@@ -902,6 +915,8 @@ def format_for_context(query: str, results: list[dict]) -> str | None:
             any_price_hints = True
             line += f" | Prices found on this page just now: {', '.join(price_hints)}"
         lines.append(line)
+    if not any(line.startswith("- ") for line in lines):
+        return None
     if any_full_text:
         lines.append(
             "Some of the above are full page content (not just a search snippet), fetched "

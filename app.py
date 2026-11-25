@@ -91,6 +91,13 @@ agent_store.init_db()
 settings_store.init_db()
 settings_store.clear_removed_media_api_credentials()
 model_metadata_store.init_db()
+# One-time import of existing GGUFs into the database. After this, all model
+# metadata reads come from PostgreSQL, never from files or GGUF headers.
+if not model_metadata_store.local_models():
+    try:
+        llamacpp.sync_library_metadata()
+    except Exception:
+        app.logger.exception("Could not import the local model library into the database")
 model_test_scenario_store.init_db()
 try:
     model_metadata_store.record_service_status("llama_web", "started", detail="llama_web started")
@@ -1075,6 +1082,11 @@ def _web_search_context(query_text: str | None, *, snippets_only: bool = False) 
                 note = _browse_framing(note)
             return note, _screenshots_from_results(results)
     except web_search.WebSearchError:
+        return None, []
+    except Exception:
+        # Playwright, DDGS and third-party pages can raise errors outside the
+        # WebSearchError hierarchy. Never let one of them kill the chat turn.
+        app.logger.exception("Live web search failed")
         return None, []
 
 
@@ -2837,6 +2849,23 @@ def _test_connection(target):
     return base + '/v1/chat/completions', model, headers
 
 
+def _agent_model_backend(provider_id: str | None, model_id: str | None) -> str:
+    """Map the agent gateway provider to the backend that actually owns a model.
+
+    Generated OpenCode configs expose local and hosted models through a single
+    ``llama-web`` provider, but model tests and handoff checks operate on the
+    owning backend (``llamacpp``, ``opencode``, ...).
+    """
+    provider = str(provider_id or "")
+    if provider != "llama-web":
+        return provider
+    identifier = str(model_id or "")
+    for backend in ("llamacpp", "opencode", "lmstudio", "lemonade", "vllm", "kobold"):
+        if identifier.startswith(backend + "/"):
+            return backend
+    return "llamacpp"
+
+
 def _test_context(target):
     client = {'lmstudio': lms, 'lemonade': lemonade, 'vllm': vllm,
               'kobold': kobold, 'opencode': zen}[target['backend']]
@@ -2851,14 +2880,15 @@ def _test_context(target):
 def _prepare_agent_model(job):
     with _reasoning_model_load_lock:
         model = job['model']
-        if model['providerID'] == 'opencode':
+        backend = _agent_model_backend(model.get('providerID'), model.get('id'))
+        if backend == 'opencode':
             _test_load_model({'backend': 'opencode', 'id': model['id']})
             return
         # _test_load_model unloads every active reasoning model before loading its
         # target. For an agent continuing with a healthy model, that eviction is
         # unnecessary and can strand the task if a backend's unload call stalls.
-        client = {'lemonade': lemonade, 'lmstudio': lms, 'vllm': vllm,
-                  'kobold': kobold}.get(model['providerID'])
+        client = {'llamacpp': llamacpp, 'lemonade': lemonade, 'lmstudio': lms,
+                  'vllm': vllm, 'kobold': kobold}.get(backend)
         if client:
             try:
                 loaded = next((entry for entry in client.list_models()
@@ -2871,7 +2901,6 @@ def _prepare_agent_model(job):
                 # Keep the existing explicit load path as the authoritative fallback
                 # when a backend cannot confirm its current model state.
                 pass
-        backend = model['providerID']
         saved_context = _saved_model_context(backend, model['id'])
         if saved_context is None:
             saved_context = 16384
@@ -2953,7 +2982,8 @@ def api_agent_models():
         loaded = [m for m in inventory if m.get('state') == 'loaded' or m.get('loaded_instances')]
         for model in configured:
             if any(model.get('id') == entry.get('id') and
-                   (not entry.get('backend') or model.get('providerID') == entry.get('backend'))
+                   (not entry.get('backend') or
+                    _agent_model_backend(model.get('providerID'), model.get('id')) == entry.get('backend'))
                    for entry in loaded):
                 model['loaded'] = True
         return jsonify({'models': configured})
@@ -4681,7 +4711,8 @@ def api_delete_model():
     if not getattr(_model_test_context, 'active', False):
         if any(
             job.get('status') in agent_tasks.ACTIVE
-            and (job.get('model') or {}).get('providerID') == backend
+            and _agent_model_backend((job.get('model') or {}).get('providerID'),
+                                     (job.get('model') or {}).get('id')) == backend
             and (job.get('model') or {}).get('id') == identifier
             for job in _agent_tasks.list()
         ):
@@ -5025,6 +5056,7 @@ def api_upload_local_model():
         with target.open("rb") as model_file:
             if model_file.read(4) != b"GGUF":
                 raise ValueError("The selected file does not have a valid GGUF header.")
+        llamacpp.sync_library_metadata()
         return jsonify({
             "ok": True,
             "model_id": llamacpp.model_id(target),
@@ -5522,6 +5554,13 @@ def api_test_settings():
         "error": "'target' must be llamacpp, opencode, caddy_llamacpp, tailscale_llamacpp, or another supported test",
         }), 400
     return jsonify({"ok": ok, "message": message})
+
+
+@app.get("/api/tools/status")
+@admin_required
+def api_tools_status():
+    """Report whether the MCP browser and Python tool servers actually started."""
+    return jsonify(mcp_tools_client.tool_status())
 
 
 @app.get("/api/settings")
@@ -6796,6 +6835,12 @@ def api_chat():
                     except Exception:
                         app.logger.exception("Could not start chat MCP tools")
                         tools_list = None
+                        result_queue.put(
+                            "data: " + json.dumps({"choices": [{"delta": {"content":
+                                "\n\n⚠️ Chat tools could not start on this server. "
+                                "Check Settings → Web search and research and the live logs."
+                            }}]}) + "\n\n"
+                        )
                 if is_npu:
                     npu_handle = _claim_selected_npu(backend, model)
                 extra_kwargs = {}

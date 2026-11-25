@@ -175,6 +175,21 @@ COMMENT ON TABLE model_registry IS
     'Hearth-managed downloaded-model registry metadata, keyed by backend and model ID.';
 COMMENT ON COLUMN model_registry.payload IS
     'Backend-specific model metadata such as local model path, context length, or dtype.';
+
+CREATE TABLE IF NOT EXISTS local_model_metadata (
+    model_id TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    publisher TEXT NOT NULL,
+    quantization TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    max_context INTEGER,
+    file_type TEXT,
+    updated_at DOUBLE PRECISION NOT NULL
+);
+COMMENT ON TABLE local_model_metadata IS
+    'Authoritative DB metadata for llama-web GGUFs; runtime model lists never parse GGUF files.';
+
 CREATE TABLE IF NOT EXISTS model_test_runs (
     id TEXT PRIMARY KEY,
     started_at DOUBLE PRECISION NOT NULL,

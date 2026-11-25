@@ -66,6 +66,19 @@ def init_db():
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS local_model_metadata (
+                model_id TEXT PRIMARY KEY,
+                path TEXT NOT NULL,
+                name TEXT NOT NULL,
+                publisher TEXT NOT NULL,
+                quantization TEXT NOT NULL,
+                size_bytes BIGINT NOT NULL DEFAULT 0,
+                max_context INTEGER,
+                file_type TEXT,
+                updated_at DOUBLE PRECISION NOT NULL
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS model_load_events (
                 id SERIAL PRIMARY KEY,
                 backend TEXT NOT NULL,
@@ -98,6 +111,36 @@ def init_db():
             ALTER TABLE model_configured_context
             DROP CONSTRAINT IF EXISTS model_configured_context_pkey
         """)
+
+
+def local_models() -> list[dict]:
+    """Authoritative metadata for llama-web-managed GGUFs. No filesystem access."""
+    with database.connect() as conn:
+        rows = conn.execute("SELECT * FROM local_model_metadata ORDER BY model_id").fetchall()
+    return [dict(row) for row in rows]
+
+
+def upsert_local_model(model_id: str, path: str, name: str, publisher: str,
+                       quantization: str, size_bytes: int, max_context: int | None,
+                       file_type: str | None) -> None:
+    with database.connect() as conn:
+        conn.execute(
+            """INSERT INTO local_model_metadata
+               (model_id, path, name, publisher, quantization, size_bytes, max_context, file_type, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT(model_id) DO UPDATE SET
+                 path=EXCLUDED.path, name=EXCLUDED.name, publisher=EXCLUDED.publisher,
+                 quantization=EXCLUDED.quantization, size_bytes=EXCLUDED.size_bytes,
+                 max_context=EXCLUDED.max_context, file_type=EXCLUDED.file_type,
+                 updated_at=EXCLUDED.updated_at""",
+            (model_id, path, name, publisher, quantization, size_bytes, max_context,
+             file_type, time.time()),
+        )
+
+
+def delete_local_model(model_id: str) -> None:
+    with database.connect() as conn:
+        conn.execute("DELETE FROM local_model_metadata WHERE model_id = %s", (model_id,))
 
 
 def downloaded_backend(model_id):

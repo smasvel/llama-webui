@@ -292,6 +292,27 @@ def available() -> bool:
     return bool(ensure_started())
 
 
+def tool_status() -> dict:
+    """Per-server startup status for the Settings page, so a silent tool failure is
+    visible instead of leaving chat with no tools and no explanation."""
+    try:
+        tools = ensure_started()
+    except Exception as exc:
+        return {
+            "available": False, "error": str(exc),
+            "browser": False, "browser_tools": 0,
+            "python": False, "python_tools": 0,
+        }
+    names = [(tool.get("function") or {}).get("name", "") for tool in tools]
+    browser = [name for name in names if name.startswith("playwright__")]
+    python = [name for name in names if name.startswith("python_repl__")]
+    return {
+        "available": bool(tools), "error": None,
+        "browser": bool(browser), "browser_tools": len(browser),
+        "python": bool(python), "python_tools": len(python),
+    }
+
+
 async def _call(server_name: str, tool_name: str, arguments: dict) -> str:
     session = _sessions.get(server_name)
     if session is None:

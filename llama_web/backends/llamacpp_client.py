@@ -92,24 +92,48 @@ def model_id(path: Path) -> str:
     return _MODEL_PREFIX + path.relative_to(LIBRARY).as_posix()
 
 
+def sync_library_metadata() -> int:
+    """Import the GGUF library into the database once so every runtime read uses DB
+    metadata instead of parsing files. Safe to re-run: it refreshes rows in place and
+    removes rows whose GGUF has been deleted from the library."""
+    from llama_web.storage import model_metadata_store as store
+
+    ids = set()
+    for path in library_entries():
+        identifier = model_id(path)
+        ids.add(identifier)
+        try:
+            size_bytes = path.stat().st_size
+        except OSError:
+            continue
+        store.upsert_local_model(
+            identifier, str(path), path.stem,
+            path.parent.name if path.parent != LIBRARY else "llama-web",
+            _quantization(path.name), size_bytes, gguf_max_context(path), None,
+        )
+    for row in store.local_models():
+        if row["model_id"] not in ids:
+            store.delete_local_model(row["model_id"])
+    return len(ids)
+
+
 def model_path(identifier: str) -> Path | None:
-    """Resolve a model id (relative library path or bare filename) to a GGUF path."""
+    """Resolve a model id to the GGUF path stored in the database."""
+    from llama_web.storage import model_metadata_store as store
+
     name = str(identifier or "").strip().strip("/")
     if name.startswith(_MODEL_PREFIX):
         name = name[len(_MODEL_PREFIX):]
     if not name or name in (".", ".."):
         return None
-    candidate = (LIBRARY / name).resolve()
     try:
-        candidate.relative_to(LIBRARY.resolve())
-    except ValueError:
+        rows = store.local_models()
+    except Exception:
         return None
-    if candidate.is_file():
-        return candidate
-    # Allow a bare filename from the Models page copyable field.
-    for path in library_entries():
-        if path.name == Path(name).name:
-            return path
+    for row in rows:
+        if row["model_id"] == _MODEL_PREFIX + name or Path(row["path"]).name == Path(name).name:
+            candidate = Path(row["path"])
+            return candidate if candidate.is_file() else None
     return None
 
 
@@ -208,42 +232,49 @@ def gguf_max_context(path: Path) -> int | None:
 
 
 def list_models() -> list[dict]:
-    """List downloaded llama-web GGUFs, marking the one the engine currently serves."""
+    """List llama-web GGUFs using database metadata, marking the served one from the
+    engine. No GGUF headers or library directory scans happen here."""
+    from llama_web.storage import model_metadata_store as store
+
+    try:
+        db_models = store.local_models()
+    except Exception:
+        db_models = []
     served = served_model()
     served_name = Path(str((served or {}).get("id") or "")).name
     meta = (served or {}).get("meta") or {}
     served_context = meta.get("n_ctx")
-    # n_ctx_train is the model's native maximum; n_ctx is the window actually served.
-    max_context = meta.get("n_ctx_train")
-    if not isinstance(max_context, int) or isinstance(max_context, bool) or max_context <= 0:
-        max_context = None
+    served_max = meta.get("n_ctx_train")
+    if not isinstance(served_max, int) or isinstance(served_max, bool) or served_max <= 0:
+        served_max = None
     default_context = configured_context()
     models = []
-    for path in library_entries():
+    for row in db_models:
+        path = Path(row["path"])
         loaded = bool(served_name) and served_name == path.name
         context = served_context if loaded else None
         if not isinstance(context, int) or isinstance(context, bool) or context <= 0:
             context = default_context
         models.append({
-            "id": model_id(path),
-            "name": path.stem,
+            "id": row["model_id"],
+            "name": row["name"],
             "type": "llm",
-            "publisher": path.parent.name if path.parent != LIBRARY else "llama-web",
+            "publisher": row["publisher"] or "llama-web",
             "state": "loaded" if loaded else "not-loaded",
-            "size_gb": round(path.stat().st_size / 1e9, 2),
+            "size_gb": round((row["size_bytes"] or 0) / 1e9, 2),
             "loaded_context_length": served_context if loaded and isinstance(served_context, int) and served_context > 0 else None,
             "configured_context_length": context,
-            "max_context_length": max_context if loaded else gguf_max_context(path),
+            "max_context_length": (served_max or row["max_context"]) if loaded else row["max_context"],
             "safe_context_length": safe_context_limit(),
             "server_model_id": (served or {}).get("id") if loaded else None,
             "compatibility_type": "gguf",
-            "quantization": _quantization(path.name),
+            "quantization": row["quantization"] or "GGUF",
             "deletable": True,
             "lan_compatible": True,
             "context_editable": True,
         })
-    # The engine may be serving a GGUF that predates the shared library. Keep it visible
-    # (and unloadable) instead of hiding the active chat model from the page.
+    # The engine may serve a GGUF outside the managed library. Keep it visible and
+    # unloadable; its only metadata comes from the engine itself, not from a file.
     if served_name and not any(model["state"] == "loaded" for model in models):
         models.insert(0, {
             "id": _MODEL_PREFIX + served_name,
@@ -254,7 +285,7 @@ def list_models() -> list[dict]:
             "size_gb": None,
             "loaded_context_length": served_context if isinstance(served_context, int) and served_context > 0 else None,
             "configured_context_length": default_context,
-            "max_context_length": max_context,
+            "max_context_length": served_max,
             "safe_context_length": safe_context_limit(),
             "server_model_id": served.get("id"),
             "compatibility_type": "gguf",
@@ -444,6 +475,8 @@ def delete_model(identifier: str) -> None:
         unload_model(identifier)
     try:
         path.unlink()
+        from llama_web.storage import model_metadata_store as store
+        store.delete_local_model(identifier)
         parent = path.parent
         while parent != LIBRARY and parent != parent.parent:
             if any(parent.iterdir()):

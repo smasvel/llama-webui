@@ -488,23 +488,37 @@ def build_opencode_config(ip, token, ports, chat_by_be, loaded_by_be, default_ov
     return json.dumps(cfg, indent=2)
 
 
+def strip_jsonc(text: str) -> str:
+    """Strip comments and trailing commas from a JSONC string without reading files."""
+    text = re.sub(r'("(?:\\.|[^"\\])*")|//[^\n]*|/\*.*?\*/',
+                  lambda match: match.group(1) or '', text, flags=re.S)
+    return re.sub(r'("(?:\\.|[^"\\])*")|,([\s]*[}\]])',
+                  lambda match: match.group(1) or match.group(2), text)
+
+
+def opencode_config_object() -> dict:
+    """The generated OpenCode config as a dict, derived from the live DB-backed inventory."""
+    return json.loads(strip_jsonc(build()['opencode_config']))
+
+
 def build_opencode_jsonc(host: str, app_port: int, api_key: str,
                          network_label: str = "local") -> str:
     """Return a copyable OpenCode JSONC config for llama-web's /v1 gateway."""
     models = _all_models()
     chat = [m for m in models if m.get("type") not in _NON_CHAT]
-    by_backend: dict[str, list[str]] = {}
-    for m in chat:
-        by_backend.setdefault(m.get("backend") or "llamacpp", []).append(m["id"])
     entries = {}
-    for backend, ids in by_backend.items():
-        for model_id in ids:
-            context = _advertised_context(backend, model_id, {}, None)
-            entries[model_id] = {
-                "name": f"{model_id} ({_LABELS.get(backend, backend)}, {network_label})",
-                "limit": {"context": context,
-                          "output": _advertised_output(backend, context, model_id)},
-            }
+    for m in chat:
+        backend = m.get("backend") or "llamacpp"
+        model_id = m["id"]
+        context = (_configured_or_loaded_context(m)
+                   or m.get("max_context_length")
+                   or _advertised_context(backend, model_id, {}, None))
+        label = m.get("name") or model_id
+        entries[model_id] = {
+            "name": f"{label} ({_LABELS.get(backend, backend)}, {network_label})",
+            "limit": {"context": context,
+                      "output": _advertised_output(backend, context, model_id)},
+        }
     config = {
         "$schema": "https://opencode.ai/config.json",
         "provider": {

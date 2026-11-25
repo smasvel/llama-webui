@@ -136,7 +136,8 @@ Linux systemd installs use:
   `LLAMA_ARG_CTX_SIZE`;
 - `~/.config/llama-web/engine-key` — local engine bearer token;
 - `~/.config/llama-web/postgres-password` — shared database secret;
-- `~/.local/share/llama-web/models/` — downloaded GGUF library.
+- `~/.local/share/llama-web/models/` — downloaded GGUF library; its metadata is
+  imported once into PostgreSQL and served from there afterwards.
 
 Override paths with `LLAMA_WEB_CONFIG`, `LLAMA_MODEL_LIBRARY`,
 `LLAMA_WEB_ENGINE_BINARY`, `LLAMA_WEB_NODE_BIN`, `LLAMA_WEB_PLAYWRIGHT_MCP_CLI`,

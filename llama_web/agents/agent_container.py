@@ -75,7 +75,10 @@ def _generated_model_config():
             return copy.deepcopy(cached)
         try:
             from llama_web.core import help_data
-            config = json.loads(help_data.build()['opencode_config'])
+            # The generated config is JSONC (comments + trailing commas); plain
+            # json.loads always failed here, so the agent picker lost every model
+            # whenever the desktop OpenCode catalog was unavailable.
+            config = help_data.opencode_config_object()
         except Exception:
             logging.exception('Could not generate the current OpenCode model inventory.')
             return copy.deepcopy(cached) if cached else None
@@ -660,6 +663,14 @@ class ContainerOpenCode(OpenCode):
         parsed = urlsplit(base_url)
         if parsed.scheme not in ('http', 'https') or not parsed.netloc or not parsed.path.endswith('/v1'):
             raise ValueError('The selected model provider has an unsupported API endpoint.')
+        # The generated gateway config advertises the LAN/Tailscale address, so
+        # external OpenCode clients can reach it. The relay itself runs on this
+        # host: using the LAN IP would fail TLS verification (the local cert is
+        # issued for a DNS name, not the IP, and 502s the agent). Route through
+        # Caddy's loopback listener instead - no certificate name mismatch.
+        if provider_id == 'llama-web' and parsed.hostname not in ('localhost', '127.0.0.1', '::1'):
+            from llama_web.core import help_data
+            base_url = f"http://127.0.0.1:{help_data._DEFAULT_PORTS['llamacpp']}/v1"
         headers = dict(options.get('headers') or {})
 
         agent_name = str(agent_name or '').strip()

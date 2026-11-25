@@ -425,6 +425,22 @@
     }
   });
 
+  async function fetchMcpToolsStatus() {
+    const el = document.getElementById("mcp-tools-status");
+    if (!el) return;
+    try {
+      const res = await fetch("/api/tools/status");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "status unavailable");
+      el.textContent = data.available
+        ? `MCP tools ready: browser ${data.browser_tools}, Python ${data.python_tools}.`
+        : `MCP tools unavailable: ${data.error || "no tool servers started"}. Check the live logs and the Node/Chromium paths.`;
+    } catch (err) {
+      el.textContent = `Could not check MCP tool servers: ${err.message}`;
+    }
+  }
+
   fetchSettings();
   fetchModelsForDefault();
+  fetchMcpToolsStatus();
 })();

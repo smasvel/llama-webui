@@ -83,6 +83,12 @@ Models can also be loaded from the Models page, which writes the selected GGUF
 and context size into `server.conf` and restarts the engine. The engine is a
 single-model server: loading one model replaces the currently served one.
 
+Model metadata (name, publisher, size, quantisation and native context) is stored
+in PostgreSQL in `local_model_metadata`, not read from GGUF files at request time.
+On first start after upgrading, existing GGUFs are imported into that table once;
+downloads and uploads refresh it automatically. This same table feeds the Chat
+and agent model pickers.
+
 Linux installs use the PrismML llama.cpp fork from
 `~/.local/share/llama-web/engine-prism/` (installed by
 `deploy/install-prism-engine.sh`). It serves ordinary quants and also loads
@@ -115,6 +121,10 @@ and `PLAYWRIGHT_BROWSERS_PATH` if your tools live elsewhere.
 
 Browser chat tools require a working Chromium; the Playwright MCP server is
 started in headless mode. The Python REPL uses the application virtualenv.
+
+Live search respects a site's response: pages that return 401/403/404/410/429/451
+or serve a captcha/access-denied page are remembered as unavailable for 30 minutes,
+never retried or worked around, and skipped in favour of the next search result.
 
 ## Coding agents
 

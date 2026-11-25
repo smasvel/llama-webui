@@ -24,6 +24,7 @@ browser with per-thread synchronization, or one browser process per worker threa
 
 from __future__ import annotations
 
+import time
 import uuid
 from contextvars import ContextVar
 from pathlib import Path
@@ -65,6 +66,44 @@ _AD_HOST_PARTS = (
 _AD_PATH_PARTS = (
     "/sponsored/", "/sponsor/", "/advertisement/", "/adclick", "/clickserve",
 )
+
+# A site that answers 401/403/404/410/429/451 or serves a challenge/captcha page
+# is unavailable to this app. Respect that answer: never retry it, never try to
+# work around the block, and move on to the next search result. A short-lived
+# in-memory negative cache keeps one bad result from being revisited during the
+# same search (and in immediately following searches) without writing files.
+_BLOCKED_STATUSES = {401, 403, 404, 410, 429, 451}
+_BLOCK_PHRASES = (
+    "access denied", "not allowed", "forbidden", "captcha", "unusual traffic",
+    "are you a robot", "verify you are human", "enable javascript and cookies",
+    "just a moment", "request blocked", "bot check",
+)
+_BLOCKED_URLS: dict[str, float] = {}
+_BLOCK_TTL_SECONDS = 30 * 60
+
+
+def mark_blocked(url: str, reason: str = "") -> None:
+    """Remember that a URL refused access. Callers must simply skip it afterwards."""
+    if url:
+        _BLOCKED_URLS[url] = time.monotonic() + _BLOCK_TTL_SECONDS
+
+
+def is_blocked(url: str) -> bool:
+    expires = _BLOCKED_URLS.get(url)
+    if expires is None:
+        return False
+    if expires <= time.monotonic():
+        _BLOCKED_URLS.pop(url, None)
+        return False
+    return True
+
+
+def looks_blocked(status: object, title: str, text: str, final_url: str = "") -> bool:
+    """Detect a refusal without trying to circumvent it."""
+    if isinstance(status, int) and status in _BLOCKED_STATUSES:
+        return True
+    haystack = " ".join(str(part or "").lower() for part in (title, text[:2000], final_url))
+    return any(phrase in haystack for phrase in _BLOCK_PHRASES)
 
 
 def is_allowed_navigation_url(url: str) -> bool:
@@ -205,10 +244,14 @@ def fetch_pages(
     omitted/None, never raised - one flaky page shouldn't sink an otherwise-good batch
     of research results, and the caller already has snippet-only data to fall back to."""
     out: dict[str, dict] = {}
+    candidates = list(dict.fromkeys(urls))  # de-dupe, preserve order
     urls = [
-        u for u in dict.fromkeys(urls)
-        if u and is_allowed_navigation_url(u)
-    ]  # de-dupe, preserve order; ads are never navigation candidates
+        u for u in candidates
+        if u and is_allowed_navigation_url(u) and not is_blocked(u)
+    ]  # ads and previously refused pages are never navigation candidates
+    skipped = len(candidates) - len(urls)
+    if skipped:
+        _report_progress(f"Skipped {skipped} blocked or disallowed result(s).")
     if not urls:
         return out
     if not _PLAYWRIGHT_AVAILABLE:
@@ -252,7 +295,11 @@ def fetch_pages(
                     try:
                         page = context.new_page()
                         try:
-                            page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                            response = page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                            status = response.status if response is not None else None
+                            if looks_blocked(status, "", "", page.url):
+                                mark_blocked(url, f"HTTP {status}")
+                                continue
                             if not is_allowed_navigation_url(page.url):
                                 continue
                             page.wait_for_timeout(settle_ms)
@@ -260,6 +307,9 @@ def fetch_pages(
                                 visit_title = (page.title() or "").strip() or None
                             except Exception:
                                 visit_title = None
+                            if looks_blocked(status, visit_title or "", "", page.url):
+                                mark_blocked(url, "blocked page title")
+                                continue
                             screenshot_name = None
                             page_images: list[str] = []
                             if screenshot_dir is not None:
@@ -277,6 +327,9 @@ def fetch_pages(
                                     page_images = []
                             text = (page.evaluate(_EXTRACT_TEXT_JS) or "").strip()
                             html = page.content()
+                            if looks_blocked(status, visit_title or "", text, page.url):
+                                mark_blocked(url, "blocked page content")
+                                continue
                             if text or html:
                                 visit_ok = True
                                 out[url] = {

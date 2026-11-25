@@ -84,6 +84,13 @@ def transfer(repo, name, revision, item):
         if checksum and digest.hexdigest() != checksum:
             raise ValueError("Downloaded checksum differs from the catalog.")
         partial.replace(target)
+        # Refresh DB model metadata so the Models page and agent pickers read the
+        # new GGUF from PostgreSQL without scanning files at request time.
+        try:
+            from llama_web.backends import llamacpp_client
+            llamacpp_client.sync_library_metadata()
+        except Exception:
+            pass
         update(state="complete")
     except (OSError, ValueError, requests.RequestException) as exc:
         message = "The catalog download failed. Please retry." if isinstance(exc, requests.RequestException) else str(exc)

@@ -160,6 +160,12 @@ class ServerPathTests(unittest.TestCase):
         self.assertTrue(Path(mcp_tools_client._NODE_BIN).is_file())
         self.assertTrue(Path(mcp_tools_client._PLAYWRIGHT_MCP_CLI).is_file())
 
+    def test_tool_status_reports_both_servers(self):
+        status = mcp_tools_client.tool_status()
+        self.assertTrue(status["available"])
+        self.assertGreater(status["browser_tools"], 0)
+        self.assertEqual(status["python_tools"], 1)
+
     def test_installed_llama_web_directory_is_a_candidate(self):
         # Fresh installs put the tools in ~/.local/share/llama-web (hyphen), not
         # the legacy llama_web (underscore) directory or a Hearth install.
