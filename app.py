@@ -1604,25 +1604,58 @@ def api_help():
 @app.route("/v1/models", methods=["GET"])
 @app.route("/v1/chat/completions", methods=["POST"])
 def openai_compatible_api():
-    """OpenAI-compatible proxy to the local llama.cpp engine for coding clients.
+    """OpenAI-compatible gateway used by the generated OpenCode configs.
 
-    The generated OpenCode configs use the app's HTTPS port (or Tailscale address)
-    and a bearer token so clients never need the engine's loopback port.
+    Local GGUF ids go to the llama.cpp engine; `opencode/...` ids go to the hosted
+    opencode.ai endpoint. Previously every request went to the local engine, which
+    made hosted agent assignments run at local-GPU speed.
     """
     expected = llamacpp.api_key()
     supplied = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     if not expected or not secrets.compare_digest(supplied, expected):
         return jsonify({"error": {"message": "Invalid API key", "type": "authentication_error"}}), 401
-    url = f"{llamacpp.base_url()}{request.path}"
+    body = request.get_data()
+    model_id = ""
+    try:
+        payload = json.loads(body) if body else {}
+        model_id = str((payload.get("model") or "") if isinstance(payload, dict) else "")
+    except (ValueError, TypeError):
+        pass
+    hosted_ids = set()
+    if request.path.endswith("/chat/completions") and model_id and not model_id.startswith("llamacpp/"):
+        try:
+            hosted_ids = {str(item.get("id") or "").removeprefix("opencode/")
+                          for item in zen.list_models()}
+        except Exception:
+            hosted_ids = set()
+    hosted = request.path.endswith("/chat/completions") and (
+        model_id.startswith("opencode/") or model_id in hosted_ids)
+    if hosted:
+        # llama_web namespaces hosted ids; opencode.ai expects the bare model name.
+        try:
+            payload = json.loads(body) if body else {}
+            payload["model"] = model_id.removeprefix("opencode/")
+            body = json.dumps(payload).encode()
+        except (ValueError, TypeError):
+            pass
+        url = f"{zen.base_url().rstrip('/')}/v1/chat/completions"
+        upstream_headers = {
+            "Authorization": f"Bearer {zen.api_key()}",
+            "Content-Type": request.headers.get("Content-Type", "application/json"),
+            "x-opencode-session": request.headers.get("x-opencode-session", "llama_web-gateway"),
+        }
+        timeout = (10, 1800)
+    else:
+        url = f"{llamacpp.base_url()}{request.path}"
+        upstream_headers = {
+            "Authorization": f"Bearer {expected}",
+            "Content-Type": request.headers.get("Content-Type", "application/json"),
+        }
+        timeout = (10, 600)
     try:
         upstream = requests.request(
-            request.method,
-            url,
-            headers={"Authorization": f"Bearer {expected}",
-                     "Content-Type": request.headers.get("Content-Type", "application/json")},
-            data=request.get_data(),
-            stream=True,
-            timeout=(10, 600),
+            request.method, url, headers=upstream_headers,
+            data=body, stream=True, timeout=timeout,
         )
     except requests.RequestException as exc:
         return jsonify({"error": {"message": str(exc), "type": "api_error"}}), 502
@@ -2048,6 +2081,13 @@ def models_page():
     """Full-page model manager for the llama.cpp engine library and hosted models.
     Admin-only, same as the model-management endpoints."""
     return render_template("models.html", username=session.get("username"))
+
+
+@app.get("/voice")
+@login_required
+def voice_page():
+    """Dedicated voice-call page (local llama.cpp or online models) with an animated face."""
+    return render_template("voice.html", username=session.get("username"))
 
 
 @app.get("/live-logs")
@@ -6118,13 +6158,60 @@ def api_voice_transcribe():
     audio_bytes = audio_file.read()
     if not audio_bytes:
         return jsonify({"error": "empty audio"}), 400
+    from llama_web.voice import stt as local_stt
     try:
-        text = lemonade.transcribe_audio(
+        text = local_stt.transcribe(
             audio_bytes, filename=audio_file.filename or "recording.webm"
         )
-    except lemonade.LemonadeError as exc:
+    except local_stt.VoiceError as exc:
         return jsonify({"error": str(exc)}), 502
     return jsonify({"text": text})
+
+
+@app.post("/api/voice/ask")
+@login_required
+def api_voice_ask():
+    """Chat for the voice call: the local llama.cpp engine or an opencode.ai model.
+    No LM Studio, no Lemonade."""
+    body = request.get_json(force=True, silent=True) or {}
+    message = str(body.get("message") or "").strip()
+    model = str(body.get("model") or "").strip()
+    if not message:
+        return jsonify({"error": "'message' is required"}), 400
+    history = body.get("history") or []
+    if not isinstance(history, list):
+        history = []
+    system = {
+        "role": "system",
+        "content": ("You are in a spoken voice call. Start every reply with an emotion tag "
+                    "like [emotion: happy], [emotion: thoughtful], [emotion: surprised], "
+                    "[emotion: concerned] or [emotion: neutral], then give a short, "
+                    "conversational answer of at most three sentences. Do not use markdown."),
+    }
+    messages = [system] + [m for m in history if isinstance(m, dict)
+                           and m.get("role") in ("user", "assistant")][-8:]
+    messages.append({"role": "user", "content": message})
+
+    def generate():
+        try:
+            if model.startswith("opencode/"):
+                for line in zen.chat_stream(messages, model, temperature=0.7,
+                                            max_tokens=256, user_id=session.get("user_id")):
+                    if line.startswith("data:"):
+                        yield line.rstrip("\n") + "\n\n"
+                return
+            for line in llamacpp.chat_stream(messages, model or llamacpp.request_model_id(),
+                                             temperature=0.7, max_tokens=256):
+                if line.startswith("data:"):
+                    yield line.rstrip("\n") + "\n\n"
+                elif line.strip().startswith("data: [DONE]"):
+                    yield "data: [DONE]\n\n"
+        except Exception as exc:
+            yield "data: " + json.dumps({"error": str(exc)[:300]}) + "\n\n"
+            yield "data: [DONE]\n\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/voice/translate")
@@ -6149,22 +6236,22 @@ def api_video_translate():
 @app.post("/api/voice/speak")
 @login_required
 def api_voice_speak():
-    """Spoken responses: given assistant reply text, returns synthesized speech (MP3
-    bytes, played directly by the browser's <audio> element - no base64/JSON wrapping,
-    same as what Lemonade's own /v1/audio/speech hands back)."""
+    """Spoken replies from the local Piper voice (WAV bytes, played directly by the
+    browser). No Lemonade or LM Studio involvement."""
+    from llama_web.voice import tts as local_tts
     body = request.get_json(force=True, silent=True) or {}
     text = (body.get("text") or "").strip()
     if not text:
         return jsonify({"error": "'text' is required"}), 400
     started = time.monotonic()
     try:
-        audio_bytes = lemonade.synthesize_speech(text, voice=body.get("voice") or lemonade.DEFAULT_TTS_VOICE)
-    except lemonade.LemonadeError as exc:
+        audio_bytes = local_tts.synthesize(text, voice=body.get("voice") or None)
+    except local_tts.VoiceError as exc:
         return jsonify({"error": str(exc)}), 502
     elapsed = time.monotonic() - started
     if elapsed >= 2:
         app.logger.warning("Slow speech synthesis took %.2fs for %d characters.", elapsed, min(len(text), 2000))
-    return Response(audio_bytes, mimetype="audio/mpeg", headers={
+    return Response(audio_bytes, mimetype="audio/wav", headers={
         "Server-Timing": f"tts;dur={elapsed * 1000:.0f}", "Cache-Control": "no-store",
     })
 

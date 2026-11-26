@@ -227,7 +227,9 @@ def offer_initial_model_download(input_fn=input):
     return True
 
 
-REQUIRED_MEDIA_MODELS = ('Whisper-Small', 'kokoro-v1', 'Anima-Turbo')
+# Voice no longer uses Lemonade: Whisper and Kokoro are replaced by local
+# faster-whisper and Piper models downloaded by download_voice_models().
+REQUIRED_MEDIA_MODELS = ('Anima-Turbo',)
 
 
 def download_required_media_models():
@@ -256,7 +258,8 @@ def download_required_media_models():
         pending.append(('Wan 2.2 TI2V-5B Q4_K_S (diffusion model, VAE, and text encoder)',
                         video_entry.get('expected_size_gb', 7.5)))
 
-    print('Required first-install media models: Whisper-Small, kokoro-v1, Anima-Turbo, and Wan 2.2.')
+    print('Required first-install media models: Anima-Turbo and Wan 2.2. '
+          'Voice uses local faster-whisper and Piper models.')
     if pending:
         known_bytes = sum(size * 1_000_000_000 for _, size in pending
                           if isinstance(size, (int, float)) and math.isfinite(size) and size > 0)
@@ -292,7 +295,17 @@ def download_required_media_models():
     video_generation._find_sd_cli()
     print(f'Loading default image model {lemonade.IMAGE_MODEL_ID}...')
     lemonade.load_model(lemonade.IMAGE_MODEL_ID)
-    print('Required audio, image, and video models are ready.')
+    print('Required image and video models are ready.')
+
+
+def download_voice_models():
+    """Pre-download the local STT/TTS models used by the llama-only voice call."""
+    from llama_web.voice import stt as local_stt, tts as local_tts
+    print(f'Preparing local voice models ({local_stt._model_name()} STT, '
+          f'{local_tts.DEFAULT_VOICE} TTS)...')
+    local_stt._get_model()
+    local_tts._model_path(local_tts.DEFAULT_VOICE)
+    print('Local voice models are ready.')
 
 
 def validate_existing_installation():
@@ -341,6 +354,7 @@ def main():
     from llama_web.core.local_tls import ensure_certificate
     ensure_certificate(ROOT / 'certs')
     download_required_media_models()
+    download_voice_models()
     if not args.skip_model_download:
         try:
             offer_initial_model_download()

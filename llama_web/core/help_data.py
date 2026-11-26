@@ -536,7 +536,10 @@ def build_opencode_jsonc(host: str, app_port: int, api_key: str,
                    or m.get("max_context_length")
                    or _advertised_context(backend, model_id, {}, None))
         label = m.get("name") or model_id
-        entries[model_id] = {
+        # Hosted ids must be bare here: an `opencode/...` key makes OpenCode
+        # dispatch to its native Go provider instead of this gateway.
+        entry_id = model_id.removeprefix("opencode/") if backend == "opencode" else model_id
+        entries[entry_id] = {
             "name": f"{label} ({_LABELS.get(backend, backend)}, {network_label})",
             "limit": {"context": context,
                       "output": _advertised_output(backend, context, model_id)},

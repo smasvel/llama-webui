@@ -30,6 +30,11 @@ MAX_STEPS_MARKER = 'CRITICAL - MAXIMUM STEPS REACHED'
 FIRST_TOKEN_TIMEOUT = 600
 PROGRESS_TIMEOUT = 300
 HANDOFF_TIMEOUT = 90
+# Hosted models answer in seconds; the long windows above exist only for slow
+# local GPU prefill and must not hide a stalled online request for ten minutes.
+ONLINE_FIRST_TOKEN_TIMEOUT = 120
+ONLINE_PROGRESS_TIMEOUT = 90
+ONLINE_HANDOFF_TIMEOUT = 120
 MAX_SESSION_RECOVERIES = 2
 MAX_TRANSPORT_RETRIES = 3
 
@@ -43,6 +48,13 @@ def fingerprint(message):
     return hashlib.sha256(json.dumps([text_of(message), parts], sort_keys=True).encode()).hexdigest()
 
 
+def is_online_model(job) -> bool:
+    """Hosted models should not inherit the multi-minute local-GPU grace periods."""
+    model = job.get('model') or {}
+    return str(model.get('id') or '').startswith('opencode/') or \
+        str(model.get('providerID')) == 'opencode'
+
+
 def response_wait_timeout(job):
     """Allow slow local-model prefill more time before any output token arrives."""
     progress = job.get('agent_model_progress') or {}
@@ -50,6 +62,8 @@ def response_wait_timeout(job):
         has_first_token = int(progress.get('tokens') or 0) > 0
     except (TypeError, ValueError):
         has_first_token = False
+    if is_online_model(job):
+        return ONLINE_PROGRESS_TIMEOUT if has_first_token else ONLINE_FIRST_TOKEN_TIMEOUT
     return PROGRESS_TIMEOUT if has_first_token else FIRST_TOKEN_TIMEOUT
 
 
@@ -353,6 +367,16 @@ class Manager:
         self.note(job, reason+f' Starting a fresh session from the saved project checkpoint (attempt {attempts+1}/{limit}).')
         self.save(job)
 
+    @staticmethod
+    def _model_label(job):
+        model = job.get('model') or {}
+        model_id = str(model.get('id') or '')
+        if is_online_model(job):
+            return 'online model'
+        if model_id.startswith('llamacpp/'):
+            return 'local llama.cpp model'
+        return 'model'
+
     def _record_live_progress(self, job, snap):
         """Make ongoing OpenCode work visible in Activity without exposing task content."""
         latest_tool = None
@@ -411,20 +435,20 @@ class Manager:
                 previous['tokens'] = tokens
                 previous['last_progress_at'] = now
             token_progressed = tokens > int(previous.get('noted_tokens') or 0)
-            note_interval = 30 if not tokens else 90
+            note_interval = (10 if not tokens else 20) if is_online_model(job) else (30 if not tokens else 90)
             should_note = (not previous.get('noted_at') or
                            now - float(previous.get('noted_at') or 0) >= note_interval or
                            tokens - int(previous.get('noted_tokens') or 0) >= 200)
             if should_note:
                 if token_progressed:
-                    text = f'Local model response is progressing: {tokens:,} tokens generated so far.'
+                    text = f'{self._model_label(job)} response is progressing: {tokens:,} tokens generated so far.'
                 elif tokens:
-                    text = f'Waiting for the local model to continue; {tokens:,} tokens received so far.'
+                    text = f'Waiting for the {self._model_label(job)} to continue; {tokens:,} tokens received so far.'
                 else:
                     elapsed = max(0, int(now - float(job.get('awaiting_since') or now)))
                     minutes, seconds = divmod(elapsed, 60)
                     waited = f'{minutes}m {seconds}s' if minutes else f'{seconds}s'
-                    text = f'Still waiting for the local model’s first response token after {waited}.'
+                    text = f'Still waiting for the {self._model_label(job)}’s first response token after {waited}.'
                 self.note(job, text)
                 previous['noted_tokens'] = tokens
                 previous['noted_at'] = now
@@ -589,7 +613,7 @@ class Manager:
             raise ValueError('Enter an agent name (up to 120 characters).')
         if len(criteria) > 10000 or len(command) > 4000 or any(len(value) > 12000 for value in (technical_requirements, memory_notes, html_requirements)):
             raise ValueError('Task requirements or verification command is too long.')
-        shell_mode = values.get('shell_mode', 'auto' if values.get('auto_commands') is True else 'ask')
+        shell_mode = values.get('shell_mode', 'auto' if values.get('auto_commands') is not False else 'ask')
         if shell_mode not in ('ask', 'auto'):
             raise ValueError('Choose whether shell commands should ask or run automatically.')
         result_label = str(values.get('result_label', '')).strip()
@@ -602,7 +626,7 @@ class Manager:
         if type(enable_thinking) is not bool:
             raise ValueError('Choose whether model thinking is enabled.')
         skills = self._normalize_skills(values, owner) if owner is not None else []
-        research_providers = values.get('research_providers', [])
+        research_providers = values.get('research_providers', ['duckduckgo'])
         allowed_research = {'duckduckgo', 'exa', 'firecrawl', 'parallel', 'tavily', 'tinyfish'}
         if not isinstance(research_providers, list) or any(
                 not isinstance(item, str) or item not in allowed_research for item in research_providers):
@@ -882,6 +906,10 @@ class Manager:
                     raise ValueError('This assignment is already completed.')
                 else:
                     job.pop('after_interrupt', None)
+                    if action == 'stop':
+                        # Remember the terminal state even when an interrupt has to
+                        # go through a live OpenCode session first.
+                        job['after_interrupt'] = 'stopped'
                     job['status'] = ('pausing' if action == 'pause' else 'stopping') if job['session_id'] else ('paused' if action == 'pause' else 'stopped')
                 self.note(job, 'User requested '+action+'.')
                 self.save(job)
@@ -1428,8 +1456,8 @@ class Manager:
                 has_request_or_tool = self._record_live_progress(job, snap)
                 if (job.get('started') and job['status'] != 'queued' and not latest_finished
                         and not has_request_or_tool
-                        and time.time()-float(job.get('agent_no_request_since') or time.time()) >= HANDOFF_TIMEOUT):
-                    self._restart_session(job, 'OpenCode stopped making requests or running tools for 90 seconds.')
+                        and time.time()-float(job.get('agent_no_request_since') or time.time()) >= (ONLINE_HANDOFF_TIMEOUT if is_online_model(job) else HANDOFF_TIMEOUT)):
+                    self._restart_session(job, f'OpenCode stopped making requests or running tools for {ONLINE_HANDOFF_TIMEOUT if is_online_model(job) else HANDOFF_TIMEOUT} seconds.')
                     return
                 # The session active list can briefly lag behind the durable
                 # assistant message. Process a completed turn even while that

@@ -8,7 +8,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from llama_web.agents.agent_tasks import Manager, MARKER, FIRST_TOKEN_TIMEOUT, PROGRESS_TIMEOUT, HANDOFF_TIMEOUT
+from llama_web.agents.agent_tasks import (
+    Manager, MARKER, FIRST_TOKEN_TIMEOUT, PROGRESS_TIMEOUT, HANDOFF_TIMEOUT,
+    ONLINE_FIRST_TOKEN_TIMEOUT, ONLINE_PROGRESS_TIMEOUT, ONLINE_HANDOFF_TIMEOUT,
+    is_online_model, response_wait_timeout,
+)
 import app
 
 MODEL = {'providerID': 'llamacpp', 'id': 'llamacpp/test-model'}
@@ -16,6 +20,29 @@ MODEL = {'providerID': 'llamacpp', 'id': 'llamacpp/test-model'}
 
 def assistant(key, text, **extra):
     return {'id': key, 'type': 'assistant', 'finish': 'stop', 'content': [{'type': 'text', 'text': text}], **extra}
+
+
+class AgentTimeoutTests(unittest.TestCase):
+    def test_online_models_use_short_timeouts(self):
+        job = {'model': {'providerID': 'llama-web', 'id': 'opencode/hy4-flash-free'}}
+        self.assertTrue(is_online_model(job))
+        self.assertEqual(response_wait_timeout(job), ONLINE_FIRST_TOKEN_TIMEOUT)
+        job['agent_model_progress'] = {'tokens': 20}
+        self.assertEqual(response_wait_timeout(job), ONLINE_PROGRESS_TIMEOUT)
+
+    def test_local_models_keep_the_long_gpu_timeouts(self):
+        job = {'model': {'providerID': 'llamacpp', 'id': 'llamacpp/model.gguf'}}
+        self.assertFalse(is_online_model(job))
+        self.assertEqual(response_wait_timeout(job), FIRST_TOKEN_TIMEOUT)
+        job['agent_model_progress'] = {'tokens': 20}
+        self.assertEqual(response_wait_timeout(job), PROGRESS_TIMEOUT)
+
+    def test_model_labels_are_accurate(self):
+        self.assertEqual(Manager._model_label(
+            {'model': {'providerID': 'llama-web', 'id': 'opencode/hy4-flash-free'}}), 'online model')
+        self.assertEqual(Manager._model_label(
+            {'model': {'providerID': 'llamacpp', 'id': 'llamacpp/model.gguf'}}),
+            'local llama.cpp model')
 
 
 class AgentTaskTests(unittest.TestCase):

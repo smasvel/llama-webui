@@ -11,6 +11,18 @@ from unittest.mock import Mock, patch
 from llama_web.agents.agent_container import ContainerOpenCode, _ModelProxy
 
 
+class AgentSessionModelTests(unittest.TestCase):
+    def test_hosted_model_is_bare_in_session_config(self):
+        model = ContainerOpenCode._agent_model_for_session(
+            {'model': {'providerID': 'llama-web', 'id': 'opencode/hy4-flash-free'}}, 'llama-web')
+        self.assertEqual(model, {'providerID': 'llama-web', 'id': 'hy4-flash-free'})
+
+    def test_local_model_id_is_preserved(self):
+        model = ContainerOpenCode._agent_model_for_session(
+            {'model': {'providerID': 'llamacpp', 'id': 'llamacpp/model.gguf'}}, 'llamacpp')
+        self.assertEqual(model, {'providerID': 'llamacpp', 'id': 'llamacpp/model.gguf'})
+
+
 class AgentContainerTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()

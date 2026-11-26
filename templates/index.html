@@ -227,7 +227,7 @@
           <div class="composer-tool-group" role="group" aria-label="Voice controls">
             <button type="button" id="speak-toggle" class="composer-icon-btn" title="Speak assistant responses aloud (local text-to-speech)" aria-pressed="false" aria-label="Toggle spoken responses">&#128266;</button>
             <button type="button" id="mic-btn" class="composer-icon-btn" title="Record a voice message (click to start, click again to stop)" aria-pressed="false" aria-label="Record voice message">&#127908;</button>
-            <button type="button" id="conversation-btn" class="composer-icon-btn" title="Hands-free voice conversation: auto-detects when you start/stop talking and speaks responses back, looping automatically. Click to start, click again to end." aria-pressed="false" aria-label="Toggle hands-free voice conversation">&#128222;</button>
+            <button type="button" id="conversation-btn" class="composer-icon-btn" title="Start a voice call with an animated assistant (click again to end)" aria-pressed="false" aria-label="Open voice call">&#128222;</button>
           </div>
           <div class="composer-tool-group" role="group" aria-label="Translation controls">
             <select id="translate-language" class="voice-language" title="Voice translation target language" aria-label="Translation target language">
@@ -285,5 +285,6 @@
   <script src="{{ asset('quiz_chat.js') }}"></script>
   <script src="{{ asset('app.js') }}"></script>
   <script src="{{ asset('model_select_search.js') }}"></script>
+  <script src="{{ asset('chat_voice_call.js') }}"></script>
 </body>
 </html>

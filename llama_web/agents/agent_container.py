@@ -487,6 +487,14 @@ class ContainerOpenCode(OpenCode):
         # the compatible provider a private ID inside the isolated config.
         return 'llama_web-opencode' if provider_id == 'opencode' else provider_id
 
+    @staticmethod
+    def _agent_model_for_session(job, provider_id):
+        model = dict(job['model'])
+        model['providerID'] = provider_id
+        if provider_id == 'llama-web' and str(model.get('id') or '').startswith('opencode/'):
+            model['id'] = model['id'].removeprefix('opencode/')
+        return model
+
     def __init__(self, runtime_directory):
         super().__init__()
         self.runtime_directory = Path(runtime_directory)
@@ -580,8 +588,11 @@ class ContainerOpenCode(OpenCode):
                     continue
                 context = (entry.get('limit') or {}).get('context')
                 usable = not isinstance(context, int) or context >= 16384
+                configured_id = ('opencode/' + model_id
+                                 if provider_id == 'llama-web' and '/' not in model_id
+                                 else model_id)
                 models.append({
-                    'providerID': provider_id, 'id': model_id,
+                    'providerID': provider_id, 'id': configured_id,
                     'name': entry.get('name') or model_id, 'context': context,
                     'usable': usable,
                     'reason': '' if usable else
@@ -635,13 +646,19 @@ class ContainerOpenCode(OpenCode):
             generated = _generated_model_config()
             if generated is not None:
                 config = generated
+        # Hosted ids are bare in the generated gateway config so OpenCode does
+        # not dispatch them to its native provider; task ids stay namespaced.
+        config_model_id = (model_id.removeprefix('opencode/')
+                           if provider_id == 'llama-web' and model_id.startswith('opencode/')
+                           else model_id)
         source = (config.get('provider') or {}).get(provider_id)
         models = (source or {}).get('models') or {}
-        model = models.get(model_id)
+        model = models.get(config_model_id) or models.get(model_id)
         if not isinstance(model, dict):
             generated = _generated_model_config()
             generated_source = (generated or {}).get('provider', {}).get(provider_id)
-            generated_model = (generated_source or {}).get('models', {}).get(model_id)
+            generated_model = (generated_source or {}).get('models', {}).get(config_model_id) \
+                or (generated_source or {}).get('models', {}).get(model_id)
             if isinstance(generated_source, dict) and isinstance(generated_model, dict):
                 config, source, model = generated, generated_source, generated_model
         if not isinstance(model, dict):
@@ -706,7 +723,7 @@ class ContainerOpenCode(OpenCode):
         if auth_plan:
             proxy_info['auth_plan'] = auth_plan
         provider = copy.deepcopy(source)
-        provider['models'] = {model_id: copy.deepcopy(model)}
+        provider['models'] = {config_model_id: copy.deepcopy(model)}
         provider_options = dict(provider.get('options') or {})
         provider_options.update({'baseURL': '', 'apiKey': proxy_info['token']})
         provider_options.pop('headers', None)
@@ -715,6 +732,9 @@ class ContainerOpenCode(OpenCode):
 
     def _agent_config(self, original, provider_id, model_id, provider, opencode_steps=40, skills=None,
                       research_providers=None, research_credentials=None, large_project_assets=False):
+        config_model_id = (model_id.removeprefix('opencode/')
+                           if provider_id == 'llama-web' and model_id.startswith('opencode/')
+                           else model_id)
         system = SYSTEM
         if large_project_assets:
             system += ('\nThis project includes large uploaded source-data files backed by the saved ZIP archive. '
@@ -835,7 +855,8 @@ class ContainerOpenCode(OpenCode):
         if agent_provider_id != provider_id:
             provider = copy.deepcopy(provider)
             provider['name'] = 'llama_web hosted-model relay'
-        config = {'$schema': 'https://opencode.ai/config.json', 'model': f'{agent_provider_id}/{model_id}',
+        config = {'$schema': 'https://opencode.ai/config.json',
+                  'model': f'{agent_provider_id}/{config_model_id}',
                 'provider': {agent_provider_id: provider},
                 'agents': {AGENT: {'description': 'Isolated persistent llama_web project worker',
                     'mode': 'primary', 'system': system,
@@ -993,7 +1014,7 @@ class ContainerOpenCode(OpenCode):
             if can_reuse:
                 self._report(job, 'Reusing the saved Docker container and OpenCode installation.')
                 session = self._endpoint(name, existing)
-                agent_model = {**job['model'], 'providerID': agent_provider_id}
+                agent_model = self._agent_model_for_session(job, agent_provider_id)
                 data = {'title': 'llama_web: '+job['title'], 'agent': AGENT,
                         'model': agent_model, 'location': {'directory': '/home/node/agents/project'},
                         'permissions': self._permissions(job)}
@@ -1040,7 +1061,7 @@ class ContainerOpenCode(OpenCode):
                 name, task_id, job,
                 large_only=has_checkpoint and bool(project_archive and not archive_pending))
         session = _EndpointOpenCode(f"http://127.0.0.1:{info['port']}", info['password'])
-        agent_model = {**job['model'], 'providerID': agent_provider_id}
+        agent_model = self._agent_model_for_session(job, agent_provider_id)
         data = {'title': 'llama_web: '+job['title'], 'agent': AGENT,
                 'model': agent_model, 'location': {'directory': '/home/node/agents/project'},
                 'permissions': self._permissions(job)}

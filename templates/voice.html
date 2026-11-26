@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="csrf-token" content="{{ csrf_token }}" />
+  <script src="{{ asset('csrf.js') }}"></script>
+  <title>Voice call — llama-web</title>
+  <link rel="stylesheet" href="{{ asset('style.css') }}" />
+</head>
+<body class="voice-page">
+  <div class="app">
+    <main class="chat">
+      <header class="chat-header">
+        <a href="{{ url_for('index') }}" class="icon-btn text-icon-btn" title="Back to chat">&larr; Chat</a>
+        <h1>Voice call</h1>
+        <div class="chat-header-actions" style="margin-left:auto;">
+          <select id="voice-model-select" class="panel-input" aria-label="Model for the voice call"></select>
+          <span class="hint">{{ username }}</span>
+          <form method="post" action="{{ url_for('logout') }}" class="logout-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button type="submit" class="logout-button hint">Sign out</button>
+          </form>
+        </div>
+      </header>
+
+      <section class="voice-stage">
+        <canvas id="voice-avatar" width="420" height="420" aria-label="Animated assistant face"></canvas>
+        <div class="voice-info">
+          <p class="hint" id="voice-status">Press Start call to allow microphone access.</p>
+          <p id="voice-caption" class="voice-caption" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <div class="voice-controls">
+        <button id="voice-start" class="panel-btn" type="button">Start call</button>
+        <button id="voice-mic" class="panel-btn" type="button" disabled>Press to talk</button>
+        <button id="voice-hangup" class="panel-btn danger" type="button" disabled>End call</button>
+      </div>
+      <p class="hint">
+        Everything runs locally in this browser and the llama.cpp engine. Speech recognition
+        uses faster-whisper and speech uses Piper; no LM Studio, Lemonade, or cloud service.
+      </p>
+    </main>
+  </div>
+  <script src="{{ asset('voice.js') }}"></script>
+</body>
+</html>

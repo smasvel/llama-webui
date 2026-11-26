@@ -23,8 +23,10 @@ hosted models from opencode.ai appear in a separate online section.
   persistent Python REPL, selected from the user's request. Web search supplies
   live context and citations.
 - Attachments, cross-chat recall using local embeddings, and browse history.
-- Voice input and spoken replies; image generation when a supported local image
-  model is loaded.
+- Voice input and spoken replies; a dedicated **Voice call** page runs on the local
+  llama.cpp model with faster-whisper transcription, Piper speech and a locally
+  animated face — no LM Studio or Lemonade. Image generation works when a supported
+  local image model is loaded.
 - Per-user model preference, request limits and thinking toggle.
 
 ### Models and downloads

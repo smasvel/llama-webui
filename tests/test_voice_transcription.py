@@ -26,9 +26,10 @@ class VoiceTranscriptionRouteTests(unittest.TestCase):
                 login_csrf_token="voice-test-csrf",
             )
 
-    def test_manual_and_hands_free_route_uses_lemonade_whisper(self):
+    def test_manual_and_hands_free_route_uses_local_whisper(self):
+        from llama_web.voice import stt as local_stt
         audio = io.BytesIO(b"sample audio")
-        with patch.object(app.lemonade, "transcribe_audio", return_value="hello llama_web") as whisper:
+        with patch.object(local_stt, "transcribe", return_value="hello llama_web") as whisper:
             response = self.client.post(
                 "/api/voice/transcribe",
                 data={"audio": (audio, "recording.webm")},
@@ -39,7 +40,8 @@ class VoiceTranscriptionRouteTests(unittest.TestCase):
         whisper.assert_called_once_with(b"sample audio", filename="recording.webm")
 
     def test_transcription_errors_return_actionable_backend_error(self):
-        with patch.object(app.lemonade, "transcribe_audio", side_effect=app.lemonade.LemonadeError("Whisper unavailable")):
+        from llama_web.voice import stt as local_stt
+        with patch.object(local_stt, "transcribe", side_effect=local_stt.VoiceError("Whisper unavailable")):
             response = self.client.post(
                 "/api/voice/transcribe",
                 data={"audio": (io.BytesIO(b"sample audio"), "recording.webm")},

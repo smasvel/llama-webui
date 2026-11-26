@@ -72,7 +72,9 @@ LLAMA_ARG_CTX_SIZE=16384
 ```
 
 On a fresh install `LLAMA_MODEL` is a placeholder. Download a GGUF from the
-**Downloads** page (it lands in `~/.local/share/llama-web/models/`), set
+**Downloads** page (it lands in `~/.local/share/llama-web/models/`). The default list
+shows trending llama.cpp function-calling GGUFs from Hugging Face; the "Browse the full
+tool-calling GGUF catalog" link opens the same filtered view on huggingface.co. Set
 `LLAMA_MODEL` to that file, and restart:
 
 ```bash
@@ -127,6 +129,17 @@ and `PLAYWRIGHT_BROWSERS_PATH` if your tools live elsewhere.
 
 Browser chat tools require a working Chromium; the Playwright MCP server is
 started in headless mode. The Python REPL uses the application virtualenv.
+
+## Voice call
+
+Click the phone button in the Chat composer to open the voice call. The avatar appears as a
+draggable floating panel above the chat window; click the phone button again or the panel's
+× to end it. Choose either the loaded local llama.cpp model
+or an opencode.ai model in the call's model picker; both go through `/api/voice/ask`.
+Speech recognition uses a local faster-whisper model and speech uses a local Piper voice.
+Neither LM Studio nor Lemonade is involved in the call. The first
+call downloads the STT/TTS models into `~/.local/share/llama-web/voice/`, or the
+installer prefetches them. `ffmpeg` and the `piper` executable must be available.
 
 Live search respects a site's response: pages that return 401/403/404/410/429/451
 or serve a captcha/access-denied page are remembered as unavailable for 30 minutes,
