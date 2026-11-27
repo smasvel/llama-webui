@@ -24,7 +24,13 @@ _TEXT_FUNCTION_ELEMENT_RE = re.compile(r'<function>\s*([\w.-]+)\s*</function>', 
 _TEXT_PARAMETER_ELEMENT_RE = re.compile(r'<parameter>(.*?)</parameter>', re.I | re.S)
 _JSON_FENCE_RE = re.compile(r"```json[^\n]*\n(.*?)```", re.I | re.S)
 _GEMMA_TOOL_RE = re.compile(r'<\|tool_call>call:([\w.-]+)(\{.*?\})(?:<tool_call\|>|<turn\|>)', re.S)
-_TEXT_TOOL_MARKERS = ("<tool_call", "<|tool_call", "```json")
+# Qwen-style native markup: <tool_calls:id><tool_call:id>NAME<arg_key:id>k</arg_key:id>
+# <arg_value:id>v</arg_value:id></tool_call:id></tool_calls:id>
+_QWEN_TOOLS_RE = re.compile(r"<tool_calls:[^>]*>(.*?)</tool_calls:[^>]*>", re.S)
+_QWEN_CALL_RE = re.compile(r"<tool_call:[^>]*>(.*?)</tool_call:[^>]*>", re.S)
+_QWEN_ARG_RE = re.compile(
+    r"<arg_key:[^>]*>(.*?)</arg_key:[^>]*>\s*<arg_value:[^>]*>(.*?)</arg_value:[^>]*>", re.S)
+_TEXT_TOOL_MARKERS = ("<tool_call", "<|tool_call", "```json", "<tool_calls:")
 
 
 def _inject_tools_block(body: dict) -> dict:
@@ -171,6 +177,28 @@ def _repair_textual_tool_calls(text: str, body: dict) -> tuple[str, list[dict]]:
             (only,) = schemas.keys()
             return only
         return None
+
+    # Qwen-family GGUFs sometimes emit their native tool markup as content instead
+    # of a structured tool_calls delta. Recover it so the call is dispatched normally.
+    qwen_block = _QWEN_TOOLS_RE.search(text or "")
+    if qwen_block:
+        calls = []
+        for block in _QWEN_CALL_RE.findall(qwen_block.group(1)):
+            name = re.split(r"<arg_key:", block, maxsplit=1)[0].strip()
+            arguments = {}
+            for key, value in _QWEN_ARG_RE.findall(block):
+                try:
+                    arguments[key] = json.loads(value)
+                except (TypeError, ValueError):
+                    arguments[key] = value
+            spec = spec_from_value({"name": name, "arguments": arguments})
+            if spec:
+                calls.append({
+                    "id": f"qwen_{len(calls)}", "type": "function",
+                    "function": {"name": spec[0], "arguments": json.dumps(spec[1])},
+                })
+        if calls:
+            return text.replace(qwen_block.group(0), "").strip(), calls
 
     # Some local GGUF chat templates leak a bare JSON tool array as ordinary content,
     # optionally followed by a native end-of-turn marker. Accept it only when the whole

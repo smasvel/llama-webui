@@ -1,8 +1,8 @@
 # llama-web
 
 A self-hosted, authenticated workspace for local AI chat, model management and
-coding agents. Chat runs against a single local **llama.cpp engine**; optional
-hosted models from opencode.ai appear in a separate online section.
+coding agents. Chat runs on one local **llama.cpp engine**; hosted opencode.ai
+models are available as an optional online backend.
 
 - [Features](#features)
 - [Fixed ports](#fixed-ports)
@@ -16,58 +16,44 @@ hosted models from opencode.ai appear in a separate online section.
 
 ### Chat
 
-- Streaming answers with saved conversations: regenerate, edit, truncate and delete chats.
-- Rich responses: headings, lists, GFM tables, fenced code, sanitised inline HTML,
-  images, Unicode emoji and shortcodes.
-- **Voice call**: click the phone button in the composer for a draggable ChatGPT-style
-  **round globe**; listening, transcribing and replying are automatic, and × ends the
-  call. Live web tools are available on every chat and voice turn when web access is
-  enabled, so the model can look things up without a keyword trigger. Live speech
-  appears as you talk; speech recognition uses faster-whisper
-  with browser live transcription, speech uses a natural local Kokoro voice (Piper
-  fallback), and the model is the one selected in Chat. Each complete sentence is
-  spoken as soon as it streams in. Voice questions use the same live-search and MCP
-  tool routing as typed chat (Playwright browser or local Python tool), execute tool
-  calls and answer from their results. Replies use the real chat transcript as context,
-  skip long local reasoning preambles, and retry the selected model on a silent reply
-  rather than switching models. Voice turns are saved in chat. No LM Studio or Lemonade.
-- Voice input and spoken replies from the local audio models.
-- Live web search with citations; blocked or captcha pages are skipped, not retried.
-- Local MCP tools for browser inspection and a persistent Python REPL, enabled by
-  default with independent Settings switches.
-- Attachments, cross-chat recall using local embeddings, and browse history.
+- Streaming answers with saved conversations: regenerate, edit, truncate, delete.
+- Rich replies: headings, lists, GFM tables, fenced code, sanitised HTML, images,
+  emoji and shortcodes.
+- **Voice call** from the composer's phone button: an animated globe listens,
+  transcribes and replies automatically. Uses local faster-whisper speech-to-text,
+  local Kokoro speech, and speaks each sentence as it arrives. Uses the model
+  selected in Chat and saves the exchange to the transcript.
+- Live web search with citations, plus Playwright browser and Python REPL MCP tools.
+  Browser tools are available on every turn when web access is enabled.
+- Attachments, cross-chat recall and browse history.
+- User model preference, request limits and thinking controls.
 
 ### Models and downloads
 
-- Models page lists GGUFs with load, unload, delete, context-size and thinking
-  controls. Metadata comes from PostgreSQL, not from parsing files at request time.
-- Native maximum context from each GGUF is shown; the loading context must be
-  smaller than that maximum.
-- Downloads default to trending llama.cpp function-calling GGUFs from Hugging Face.
-- Upload a local GGUF or download one from Hugging Face with real file sizes and
-  completion progress.
+- Models page with load, unload, delete, context-size and thinking controls.
+- Native GGUF context maximum shown for each model; stored in PostgreSQL.
+- Downloads default to trending llama.cpp function-calling GGUFs on Hugging Face.
+- Local GGUF upload and Hugging Face downloads with progress and file sizes.
 - Online tab lists opencode.ai models when a per-user API key is configured.
 
 ### Coding agents
 
-- OpenCode assignments run in isolated Docker containers with live progress,
-  workspace files, checkpoints, verification commands and saved results.
-- Shell commands run automatically and DuckDuckGo online research is enabled by
-  default; both are editable per assignment.
-- Local llama.cpp and hosted opencode.ai models are routed correctly through the
-  app's `/v1` gateway, with model-appropriate timeouts.
+- Isolated Docker assignments with live progress, workspace files, checkpoints,
+  verification commands and saved results.
+- Automatic shell permissions and DuckDuckGo research by default, configurable
+  per assignment.
+- Local and hosted models routed through the app's `/v1` gateway.
 - Schedules, reusable skills, private-by-default assignments and explicit sharing.
-- A persistent supervisor picks up queued work; assignments can be rerun or edited.
+- Persistent supervisor with rerun and edit-and-rerun.
 
-### Administration and operations
+### Administration
 
 - User accounts, roles, per-user agent access and auth-event history.
-- Per-user opencode.ai keys and personal Caddy tokens stored encrypted in PostgreSQL.
+- Per-user opencode.ai keys and Caddy tokens encrypted in PostgreSQL.
 - Settings for chat limits, web search, MCP tools, gateway identities and TLS.
 - Live request feed with traces and cancellation; request metrics API.
-- Quizzes with saved decks, generated quizzes and saved scenarios.
-- Local HTTPS certificate management and generated OpenCode/Continue configs from
-  the Help panel.
+- Quizzes with saved decks and scenarios.
+- Local HTTPS certificate management and copyable OpenCode/Continue configs in Help.
 
 ## Fixed ports
 
@@ -91,9 +77,9 @@ bash deploy/install-first-time.sh
 ```
 
 This installs host packages, PostgreSQL, the app and Python environment, the local
-MCP tools and Chromium, the local voice models (faster-whisper and Piper), and the
-`llama-web-*` systemd user units. Use `--skip-browser` to skip Chromium or
-`--no-service` to install without starting services.
+MCP runtime and Chromium, the local voice models, and the `llama-web-*` systemd
+user units. Use `--skip-browser` to skip Chromium or `--no-service` to install
+without starting services.
 
 ### Windows and macOS
 
@@ -101,8 +87,7 @@ Release bundles ship `deploy/install-release.ps1` and `deploy/install-release.sh
 They install the Python environment, PostgreSQL via Docker Compose and a prebuilt
 `llama-server`. Start with `deploy/start-llama-web.ps1` (Windows) or
 `bash deploy/start-llama-web.sh` (macOS/Linux), then open the HTTPS URL printed by
-the installer. On Linux the engine is the PrismML fork so PTQ1_0 ternary GGUFs work.
-On first visit, create the administrator account.
+the installer. On first visit, create the administrator account.
 
 See [deploy/FIRST_TIME_INSTALL.md](deploy/FIRST_TIME_INSTALL.md) for full details.
 
@@ -111,7 +96,7 @@ See [deploy/FIRST_TIME_INSTALL.md](deploy/FIRST_TIME_INSTALL.md) for full detail
 1. Sign in and open **Downloads** to fetch a GGUF, or **Models** to upload one.
 2. In **Models**, load the GGUF and optionally set its context size.
 3. Pick the loaded model in **Chat** and start a conversation, or click the phone
-   button for a voice call with an animated assistant.
+   button for a voice call.
 4. **Agents** is optional: create an assignment, watch its progress and collect the
    result. Private by default; share explicitly when needed.
 5. **Settings** and **Users** are admin-only. **Live logs** streams diagnostics.
@@ -130,7 +115,7 @@ Linux systemd installs use:
 
 Override paths with `LLAMA_WEB_CONFIG`, `LLAMA_MODEL_LIBRARY`,
 `LLAMA_WEB_ENGINE_BINARY`, `LLAMA_WEB_NODE_BIN`, `LLAMA_WEB_PLAYWRIGHT_MCP_CLI`,
-`LLAMA_WEB_CHROMIUM_PATH` and `PLAYWRIGHT_BROWSERS_PATH`.
+`LLAMA_WEB_CHROMIUM_PATH`, `PLAYWRIGHT_BROWSERS_PATH` and `LLAMA_WEB_TTS_VOICE`.
 
 On the Radeon 890M Vulkan runtime, a 65,536-token window needs a smaller GGUF:
 `Ternary-Bonsai-2-27B-PTQ1_0`, `Qwen3.8-27B-UD-KQVQ4-IQ3Floor-10G-MTP` or
@@ -145,9 +130,6 @@ Code lives in `llama_web/` by domain; `app.py` is the web entry point and
 .venv/bin/python tools/run_tests.py
 .venv/bin/python tools/run_tests.py --browser
 ```
-
-The browser runner discovers `tools/check_*_ui.py` suites and runs desktop and
-mobile checks.
 
 ## Safety
 

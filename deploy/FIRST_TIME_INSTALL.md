@@ -117,11 +117,12 @@ Models page; set a loading context smaller than that maximum.
 ## Chat tools
 
 Chat can use local MCP tools (Playwright browser inspection and the Python REPL)
-when the request clearly needs them. MCP browser tools, the Python REPL and live
-web search are all enabled by default on a first-time install; the Settings page
-has separate **Enable MCP browser tools** and **Enable Python tool** switches to
-turn them off independently. The Python tool runs in the application virtualenv
-(the `mcp` package is in `requirements.txt`) and does not depend on web search.
+and live web search. MCP browser tools, the Python REPL and live web search are
+enabled by default; the Settings page has separate **Enable MCP browser tools** and
+**Enable Python tool** switches. Browser read tools are offered on every turn when
+web search is enabled, so the model can look things up without a keyword trigger;
+the Python tool is selected for calculation and script requests. The Python tool
+runs in the application virtualenv and does not depend on web search.
 The installer sets up Node,
 `@playwright/mcp` and Chromium under `~/.local/share/llama-web/` unless
 `--skip-browser` was passed. The runtime paths are resolved in
@@ -138,41 +139,29 @@ never retried or worked around, and skipped in favour of the next search result.
 
 ## Voice call
 
-Click the phone button in the Chat composer (or open `/voice` directly). The avatar
-appears as a draggable floating panel above the chat window; click the phone button
-again or the panel's × to end the call. The picker uses the current chat model and
-supports both local llama.cpp and opencode.ai models.
+Click the phone button in the Chat composer to open the voice call. A draggable
+panel shows a ChatGPT-style globe; the × button or the Chat phone button ends the
+call. There is no in-panel talk button — listening, transcription and replies are
+automatic.
 
-- Speech recognition: local faster-whisper; synthesis: local Piper voice.
-- The call uses the model currently selected in Chat; change it there before calling.
-  If that model stalls or returns nothing, the call retries once with the other
-  loaded model before showing an error.
-- The call shows a ChatGPT-style round globe built from inline SVG; it spins gently
-  while listening, faster while the model is thinking or speaking. Voice questions
-  use the same live-search and MCP tool routing as chat: Playwright browser read tools
-  are available on every turn when web search is enabled, calculation/script requests
-  get the local Python tool, and results are fed back before the spoken answer.
-  Detection, transcription and replies run
-  automatically; the only in-panel control is the ×
-  button that ends the call (the Chat phone button toggles it too). While the call is
-  open, the chat's spoken-response mode is muted so only the globe speaks. Status shows
-  "Listening…" only while speech is being captured and "Ready — start speaking"
-  once the reply finishes. Each complete sentence is spoken as it arrives rather
-  than after the full reply. Hosted replies time out after 45 s, local ones after 90 s.
-  No CDN or external
-  image service is used. Override
-  the voice with `LLAMA_WEB_TTS_VOICE` if needed; the default is Kokoro `af_heart`,
-  with local Piper as a fallback.
-  Words appear live as you speak where the browser supports live transcription;
-  the server transcription is the fallback. The status shows "Listening…" rather than "Recording…".
-- Each spoken turn is saved in the current chat conversation and appears in the
-  transcript like a typed message.
-- No LM Studio or Lemonade is involved.
-- A busy lock and cooldown prevent the voice detector from restarting recording
-  while a reply is being processed; speaking interrupts playback.
-- Models are cached under `~/.local/share/llama-web/voice/`. The installer prefetches
-  them; otherwise the first use downloads them. `ffmpeg` and the `piper` executable
-  must be available.
+- The call uses the model selected in Chat (local llama.cpp or opencode.ai). Change
+  it in Chat before calling. A silent reply retries the selected model rather than
+  switching models.
+- Speech recognition uses local faster-whisper, with browser live transcription
+  where supported. Speech uses local Kokoro `af_heart`, with Piper as a fallback;
+  override with `LLAMA_WEB_TTS_VOICE`.
+- Voice questions use the same live-search and MCP tool routing as chat. Playwright
+  read tools are available on every turn when web search is enabled, calculation and
+  script requests use the local Python tool, and tool results are fed back before
+  the spoken answer.
+- Each complete sentence is spoken as soon as it streams in. Status shows
+  "Listening…" only while speech is captured, then "Ready — start speaking".
+- Chat's spoken-response mode is muted while the call is open, so only the globe
+  speaks. Each spoken turn is saved in the current chat conversation.
+- Hosted replies time out after 45 s, local ones after 90 s. No LM Studio or
+  Lemonade is involved.
+- Voice models are cached under `~/.local/share/llama-web/voice/`; the installer
+  prefetches them. `ffmpeg` must be available on `PATH`.
 
 ## Coding agents
 

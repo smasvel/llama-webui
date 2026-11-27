@@ -16,6 +16,20 @@ BODY = {
 
 
 class StreamedToolRepairTests(unittest.TestCase):
+    def test_qwen_native_tool_markup_becomes_a_structured_call(self):
+        tag = "abc123"
+        text = (
+            "I’ll check the page.\n"
+            f"<tool_calls:{tag}><tool_call:{tag}>get_weather"
+            f"<arg_key:{tag}>q</arg_key:{tag}><arg_value:{tag}>Durham nc"
+            f"</arg_value:{tag}></tool_call:{tag}></tool_calls:{tag}>"
+        )
+        clean, calls = helpers._repair_textual_tool_calls(text, BODY)
+        self.assertEqual(clean, "I’ll check the page.")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["function"]["name"], "get_weather")
+        self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"q": "Durham nc"})
+
     def test_bare_json_tool_array_becomes_a_structured_call(self):
         text = '[{"name": "get_weather", "arguments": {"q": "Durham nc"}}]<end_of_turn>'
         clean, calls = helpers._repair_textual_tool_calls(text, BODY)

@@ -7359,19 +7359,20 @@ def api_chat():
                             "tool_call_id": tc.get("id") or f"call_{tool_round}_{tc_name}",
                             "content": tool_result,
                         })
-                    if browser_read_count >= browser_read_limit or (
-                        not read_this_round and repeated_navigation
-                    ):
+                    if (browser_read_count >= browser_read_limit
+                            or (not read_this_round and repeated_navigation)) \
+                            and not browser_research_closed:
                         browser_research_closed = True
-                        remaining_tools = [
-                            tool for tool in (extra_kwargs.get("tools") or [])
-                            if not (tool.get("function") or {}).get("name", "").startswith("playwright__")
-                        ]
-                        if remaining_tools:
-                            extra_kwargs["tools"] = remaining_tools
-                        else:
-                            extra_kwargs.pop("tools", None)
-                            extra_kwargs.pop("parallel_tool_calls", None)
+                        # Keep the schema offered: removing tools mid-stream makes
+                        # this model leak its next call as raw markup. The dispatch
+                        # loop already answers further calls with a limit message.
+                        loop_messages.append({
+                            "role": "system",
+                            "content": ("Browser research is now closed for this turn. "
+                                        "Do not call any more browser tools. Answer from "
+                                        "the verified results already collected and name "
+                                        "any missing information."),
+                        })
                 if not cancel_event.is_set() and not (assistant_parts or reasoning_parts or source_reply):
                     raise backend_error("The model returned no reply. Retry the message.")
             except Exception as exc:
