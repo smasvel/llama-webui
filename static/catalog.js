@@ -166,13 +166,15 @@ async function search() {
   request = new AbortController();
   const signal = request.signal;
   const term = query.value.trim();
-  // Default view mirrors https://huggingface.co/models?apps=llama.cpp&other=function-calling&sort=trending
+  // Default view mirrors:
+  // https://huggingface.co/models?library=gguf&apps=llama.cpp&sort=trending&other=function-calling
   document.querySelector('#catalog-all').href =
-    'https://huggingface.co/models?apps=llama.cpp&other=function-calling&sort=trending';
+    'https://huggingface.co/models?library=gguf&apps=llama.cpp&sort=trending&other=function-calling';
   const url = new URL('https://huggingface.co/api/models');
   const params = term
     ? { filter: 'gguf', search: term, sort: 'trendingScore', direction: '-1', limit: '50', full: 'true' }
-    : { filter: 'gguf,function-calling', apps: 'llama.cpp', sort: 'trendingScore', direction: '-1', limit: '50', full: 'true' };
+    : { filter: 'gguf', apps: 'llama.cpp', other: 'function-calling',
+        sort: 'trendingScore', direction: '-1', limit: '50', full: 'true' };
   url.search = new URLSearchParams(params);
   status.textContent = 'Searching public GGUF models…';
   try {

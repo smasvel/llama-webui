@@ -17,11 +17,47 @@
   let speaking = false;
   let source = null;
   let controller = null;
+  let askTimeout = null;
   let vadRaf = null;
   let emotion = "neutral";
   let mouth = 0.08;
+  let blink = 0;
   let history = [];
   let speechRms = 0;
+
+  // A person pauses between words and sentences. Never stop on the first quiet
+  // frame: require a sustained pause after speech has actually started.
+  const VAD_SPEECH_RMS = 0.035;
+  const VAD_SILENCE_RMS = 0.018;
+  const VAD_SILENCE_MS = 900;
+  const VAD_MIN_SPEECH_MS = 450;
+  const VAD_MAX_UTTERANCE_MS = 15000;
+  let speechStartedAt = 0;
+  let silenceStartedAt = 0;
+  let onsetFrames = 0;
+  let bargeInSince = 0;
+  let recognition = null;
+  let liveTranscript = "";
+  let pendingSpeech = "";
+  let speechChain = Promise.resolve();
+  let streamedSpoken = false;
+  let speechGeneration = 0;
+  let lastSpokenText = "";
+
+  function queueSpeak(text) {
+    const clean = cleanText(text);
+    if (!clean || clean === lastSpokenText) return;
+    lastSpokenText = clean;
+    streamedSpoken = true;
+    const generation = speechGeneration;
+    speechChain = speechChain.then(async () => {
+      if (generation !== speechGeneration) return;
+      setStatus("Speaking…");
+      await speak(clean);
+      // Small pause between sentences so consecutive clips never sound overlapped.
+      await new Promise((resolve) => setTimeout(resolve, 180));
+    });
+  }
   let blinkUntil = 0;
   let nextBlink = Date.now() + 2000;
 
@@ -44,24 +80,29 @@
     const close = el("button", "icon-btn", "×");
     close.type = "button";
     close.setAttribute("aria-label", "End voice call");
-    close.style.marginLeft = "auto";
+    close.title = "End voice call";
+    close.style.cssText = "margin-left:auto;width:22px;height:22px;padding:0;line-height:1;";
     close.addEventListener("click", closeCall);
     head.appendChild(close);
 
-    const canvas = el("canvas");
-    canvas.width = 280;
-    canvas.height = 220;
-    canvas.style.cssText = "display:block;width:100%;background:#101725;";
+    const globe = el("div", "voice-globe");
+    globe.innerHTML = `<svg viewBox="0 0 100 100" aria-hidden="true">
+      <circle cx="50" cy="50" r="42" fill="none" stroke="currentColor" stroke-width="2"/>
+      <ellipse cx="50" cy="50" rx="18" ry="42" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <ellipse cx="50" cy="50" rx="34" ry="42" fill="none" stroke="currentColor" stroke-width="1" opacity="0.65"/>
+      <ellipse cx="50" cy="50" rx="42" ry="16" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <ellipse cx="50" cy="50" rx="42" ry="31" fill="none" stroke="currentColor" stroke-width="1" opacity="0.65"/>
+    </svg>`;
+    globe.style.cssText = "display:flex;align-items:center;justify-content:center;height:240px;" +
+      "color:#8fd9cf;background:radial-gradient(circle at 50% 45%,#1b3440,#101725 70%);";
+    globe.querySelector("svg").style.cssText = "width:170px;height:170px;transform-origin:center;" +
+      "animation:voice-globe-spin 12s linear infinite;";
     const status = el("p", "hint", "Connecting…");
     status.style.cssText = "margin:8px 10px 4px;min-height:1.2em;";
     const caption = el("p", "voice-float-caption", "");
-    caption.style.cssText = "margin:0 10px 8px;min-height:2.6em;font-size:13px;line-height:1.4;";
-    const talk = el("button", "panel-btn", "Hold to talk");
-    talk.type = "button";
-    talk.style.cssText = "margin:0 10px 10px;width:calc(100% - 20px);";
-    talk.addEventListener("click", () => recording ? stopRecording() : startRecording());
+    caption.style.cssText = "margin:0 10px 14px;min-height:2.6em;font-size:13px;line-height:1.4;";
 
-    wrap.append(head, canvas, status, caption, talk);
+    wrap.append(head, globe, status, caption);
     document.body.appendChild(wrap);
 
     let dragging = false;
@@ -82,9 +123,16 @@
       wrap.style.right = "auto";
       wrap.style.bottom = "auto";
     });
-    head.addEventListener("pointerup", () => { dragging = false; });
+    head.addEventListener("pointerup", (event) => {
+      dragging = false;
+      if (head.hasPointerCapture?.(event.pointerId)) head.releasePointerCapture(event.pointerId);
+    });
+    head.addEventListener("pointercancel", (event) => {
+      dragging = false;
+      if (head.hasPointerCapture?.(event.pointerId)) head.releasePointerCapture(event.pointerId);
+    });
 
-    return { wrap, canvas, status, caption, talk };
+    return { wrap, globe, status, caption };
   }
 
   function setStatus(text) { if (widget) widget.status.textContent = text; }
@@ -99,51 +147,38 @@
     return Math.sqrt(sum / data.length);
   }
 
-  function draw() {
-    if (!widget) return;
-    const ctx = widget.canvas.getContext("2d");
-    const w = widget.canvas.width;
-    const h = widget.canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#101725";
-    ctx.fillRect(0, 0, w, h);
-    const cx = w / 2;
-    const cy = h / 2 + 8;
-    const target = speaking ? Math.min(0.95, 0.1 + speechRms * 7) : 0.08;
-    mouth += (target - mouth) * 0.3;
-    ctx.fillStyle = "#d9b8a3";
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, 86, 104, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#4b3a33";
-    ctx.beginPath();
-    ctx.ellipse(cx, cy - 72, 88, 38, 0, Math.PI, Math.PI * 2);
-    ctx.fill();
-    const blinking = Date.now() < blinkUntil;
-    if (Date.now() > nextBlink) { blinkUntil = Date.now() + 130; nextBlink = Date.now() + 2000 + Math.random() * 2200; }
-    for (const dx of [-34, 34]) {
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.ellipse(cx + dx, cy - 18, 15, blinking ? 1.5 : 12, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#3a2b26";
-      ctx.beginPath();
-      ctx.arc(cx + dx, cy - 18, 6, 0, Math.PI * 2);
-      ctx.fill();
+  let globeTimer = null;
+
+  function animateGlobe() {
+    if (!widget || !widget.globe) return;
+    const svg = widget.globe.querySelector("svg");
+    if (!svg) return;
+    if (speaking) {
+      svg.style.animationDuration = "4s";
+      widget.globe.style.filter = "drop-shadow(0 0 14px rgba(143,217,207,0.65))";
+    } else if (busy) {
+      svg.style.animationDuration = "7s";
+      widget.globe.style.filter = "drop-shadow(0 0 8px rgba(143,217,207,0.35))";
+    } else {
+      svg.style.animationDuration = "16s";
+      widget.globe.style.filter = "none";
     }
-    ctx.strokeStyle = "#4b3a33";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    const slant = emotion === "concerned" ? 7 : emotion === "happy" ? -3 : 0;
-    ctx.moveTo(cx - 50, cy - 42 + slant); ctx.lineTo(cx - 18, cy - 42 - slant);
-    ctx.moveTo(cx + 18, cy - 42 - slant); ctx.lineTo(cx + 50, cy - 42 + slant);
-    ctx.stroke();
-    ctx.fillStyle = "#7c3b3b";
-    ctx.beginPath();
-    ctx.ellipse(cx, cy + 48, 24, 5 + mouth * 22, 0, 0, Math.PI * 2);
-    ctx.fill();
-    requestAnimationFrame(draw);
+    if (globeTimer) clearTimeout(globeTimer);
+    globeTimer = setTimeout(animateGlobe, 400);
   }
+
+  // Diagnostic hook used by the Playwright voice-call checks.
+  window.__voiceCallDebug = () => ({
+    globe: !!widget?.globe,
+    recording,
+    speaking,
+    level: micAnalyser ? rms() : null,
+    model: document.getElementById("model-select")?.value || "",
+  });
+  // Test seam: the panel has no buttons; checks submit a completed utterance here.
+  window.__voiceCallTest = {
+    send: (text) => processUtterance(new Blob([text]), text),
+  };
 
   function cleanText(raw) {
     const match = String(raw || "").match(/^\s*\[emotion:\s*([a-z]+)\]/i);
@@ -162,23 +197,95 @@
     return data && data.error ? String(data.error) : fallback;
   }
 
+  function startLiveTranscription() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    liveTranscript = "";
+    if (!SpeechRecognition || !navigator.mediaDevices) return;
+    try {
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || "en-US";
+      recognition.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const text = event.results[i][0]?.transcript || "";
+          if (event.results[i].isFinal) liveTranscript += `${text} `;
+          else interim += text;
+        }
+        const shown = `${liveTranscript}${interim}`.trim();
+        if (shown) setCaption(`You: ${shown}`);
+      };
+      recognition.onerror = () => { /* server transcription remains the fallback */ };
+      recognition.onend = () => {
+        if (recording && recognition) {
+          try { recognition.start(); } catch (_) { /* browser may block restart */ }
+        }
+      };
+      recognition.start();
+    } catch (_) {
+      recognition = null;
+    }
+  }
+
+  function stopLiveTranscription() {
+    if (!recognition) return "";
+    const finalText = liveTranscript.trim();
+    const current = recognition;
+    recognition = null;
+    current.onend = null;
+    try { current.stop(); } catch (_) { /* already stopped */ }
+    return finalText;
+  }
+
   async function transcribe(blob) {
     const form = new FormData();
     form.append("audio", blob, "utterance.webm");
-    const response = await fetch("/api/voice/transcribe", { method: "POST", body: form });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(readError(data, `Transcription failed (${response.status}).`));
-    if (!data.text) throw new Error("No transcript returned.");
-    return data.text;
+    const transcribeController = new AbortController();
+    const timer = setTimeout(() => transcribeController.abort(new Error("Transcription timed out.")), 45000);
+    try {
+      const response = await fetch("/api/voice/transcribe", {
+        method: "POST", body: form, signal: transcribeController.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(readError(data, `Transcription failed (${response.status}).`));
+      if (!data.text) throw new Error("No speech detected — try speaking a little closer.");
+      return data.text;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  async function ask(message) {
+  async function ask(message, modelOverride, onSentence) {
+    pendingSpeech = "";
     controller = new AbortController();
-    const model = document.getElementById("model-select")?.value || "";
+    const model = modelOverride || document.getElementById("model-select")?.value || "";
+    // Keep the spoken turn responsive: hosted reasoning is usually a few seconds,
+    // local GGUFs get a little longer. Never leave the user in "Thinking…" for minutes.
+    const budget = model.startsWith("opencode/") ? 45000 : 90000;
+    const timeout = setTimeout(() => controller.abort(new Error("No response from the model.")), budget);
+    askTimeout = timeout;
+    const conversationId = window.ChatApp?.getConversationId?.() || "";
+    // Reuse the real chat transcript as context, like an advanced assistant,
+    // instead of only remembering turns spoken during this call.
+    let chatHistory = history;
+    try {
+      if (conversationId) {
+        const saved = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`)
+          .then((response) => response.json());
+        const messages = (saved.messages || []).filter((item) =>
+          ["user", "assistant"].includes(item.role) && item.content).slice(-8);
+        if (messages.length) {
+          chatHistory = messages.map((item) => ({ role: item.role, content: item.content }));
+        }
+      }
+    } catch (_) { /* in-memory history remains the fallback */ }
     const response = await fetch("/api/voice/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, history, model }),
+      body: JSON.stringify({
+        message, history: chatHistory, model, conversation_id: conversationId,
+      }),
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -204,43 +311,74 @@
           const event = JSON.parse(payload);
           if (event.error) throw new Error(event.error);
           const choice = (event.choices || [])[0] || {};
-          answer += event.content || (choice.delta?.content || "") || "";
+          const delta = event.content || (choice.delta?.content || "") || "";
+          answer += delta;
           setCaption(answer);
+          // Speak each complete sentence as soon as it arrives instead of waiting
+          // for the whole reply to finish streaming.
+          if (onSentence && delta) {
+            pendingSpeech += delta;
+            const match = pendingSpeech.match(/[.!?](?:\s|$)/);
+            if (match) {
+              const sentence = pendingSpeech.slice(0, match.index + 1).trim();
+              pendingSpeech = pendingSpeech.slice(match.index + 1);
+              if (sentence) onSentence(sentence);
+            }
+          }
         } catch (err) {
           if (!(err instanceof SyntaxError)) throw err;
         }
       }
     }
+    clearTimeout(timeout);
+    askTimeout = null;
     controller = null;
     return answer;
   }
 
   async function speak(text) {
-    const response = await fetch("/api/voice/speak", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(readError(data, `Speech failed (${response.status}).`));
+    if (window.__voiceSpeakerBusy) return;
+    window.__voiceSpeakerBusy = true;
+    try {
+      const response = await fetch("/api/voice/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(readError(data, `Speech failed (${response.status}).`));
+      }
+      const buffer = await audioCtx.decodeAudioData(await response.arrayBuffer());
+      const player = audioCtx.createBufferSource();
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      player.buffer = buffer;
+      player.connect(analyser);
+      analyser.connect(audioCtx.destination);
+      source = player;
+      const finish = () => {
+        if (source === player) { speaking = false; source = null; }
+        speechRms = 0;
+        window.__voiceSpeakerBusy = false;
+        cooldownUntil = Date.now() + 800;
+        setStatus("Ready — start speaking");
+      };
+      player.onended = finish;
+      speaking = true;
+      player.start();
+      setTimeout(() => { if (window.__voiceSpeakerBusy && source === player) finish(); },
+        Math.min(120000, (buffer.duration || 30) * 1000 + 2000));
+      const meter = () => {
+        if (source !== player || !speaking) return;
+        speechRms = rmsFrom(analyser);
+        requestAnimationFrame(meter);
+      };
+      meter();
+    } catch (error) {
+      window.__voiceSpeakerBusy = false;
+      throw error;
     }
-    const buffer = await audioCtx.decodeAudioData(await response.arrayBuffer());
-    source = audioCtx.createBufferSource();
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    source.buffer = buffer;
-    source.connect(analyser);
-    analyser.connect(audioCtx.destination);
-    source.onended = () => { speaking = false; source = null; speechRms = 0; };
-    source.start();
-    speaking = true;
-    const meter = () => {
-      if (!speaking) return;
-      speechRms = rmsFrom(analyser);
-      requestAnimationFrame(meter);
-    };
-    meter();
   }
 
   function rmsFrom(analyser) {
@@ -251,49 +389,101 @@
     return Math.sqrt(sum / data.length);
   }
 
-  async function processUtterance(blob) {
+  function modelLabel(modelId) {
+    const options = [...(document.getElementById("model-select")?.options || [])];
+    const option = options.find((item) => item.value === modelId);
+    if (option) return option.textContent.replace(/\s*\((?:online|local llama\.cpp engine)\)\s*$/, "");
+    return String(modelId || "the model").split("/").pop();
+  }
+
+  async function processUtterance(blob, liveText) {
     if (busy) return;
     busy = true;
+    lastSpokenText = "";
     setStatus("Transcribing…");
     try {
-      const userText = await transcribe(blob);
+      const userText = (liveText || "").trim() || await transcribe(blob);
+      if (!userText.trim()) {
+        setCaption("Didn't catch that — please try again.");
+        setStatus("Ready — start speaking");
+        return;
+      }
       setCaption(`You: ${userText}`);
       setStatus("Thinking…");
-      const raw = await ask(userText);
+      let raw = "";
+      streamedSpoken = false;
+      speechGeneration += 1;
+      const selected = document.getElementById("model-select")?.value || "";
+      // Stay on the model the user chose. Give it up to two attempts with a
+      // longer timeout rather than silently switching to a different model.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          if (attempt) {
+            setStatus(`Retrying with ${modelLabel(selected)}…`);
+            speechGeneration += 1; // stop any speech from the stalled attempt
+          }
+          raw = await ask(userText, selected, queueSpeak);
+          if (cleanText(raw)) break;
+        } catch (_) {
+          raw = "";
+        }
+      }
       const text = cleanText(raw);
       setCaption(text || "(no reply)");
+      // The server persisted both turns in the current chat conversation; show them.
+      try {
+        await window.ChatApp?.refreshConversations?.();
+        const cid = window.ChatApp?.getConversationId?.();
+        if (cid) await window.ChatApp?.loadConversation?.(cid);
+      } catch (_) { /* voice call still works if the chat view is unavailable */ }
       history.push({ role: "user", content: userText }, { role: "assistant", content: text });
       history = history.slice(-8);
-      if (text) {
+      if (text && streamedSpoken) {
+        if (pendingSpeech.trim()) queueSpeak(pendingSpeech);
+        await speechChain;
+      } else if (text) {
         setStatus("Speaking…");
         await speak(text);
       }
-      setStatus("Listening…");
+      setStatus("Ready — start speaking");
     } catch (err) {
-      setStatus(`Error: ${err.message}`);
+      if (askTimeout) clearTimeout(askTimeout);
+      askTimeout = null;
+      const message = String(err.message || "");
+      if (/speech|transcri|no transcript/i.test(message)) {
+        setStatus("Ready — start speaking");
+        setCaption("I didn't catch that — please say it once more.");
+      } else {
+        setStatus(`${message} — listening again.`);
+        setCaption("No reply that time. Try repeating yourself.");
+      }
     } finally {
       busy = false;
-      cooldownUntil = Date.now() + 3000;
+      // Give speaker echo time to fade before the mic can start a new turn.
+      cooldownUntil = Date.now() + 500;
     }
   }
 
   function startRecording() {
     if (recording || !stream) return;
+    speechStartedAt = Date.now();
+    silenceStartedAt = 0;
+    onsetFrames = 0;
     try {
       recorder = new MediaRecorder(stream);
       chunks = [];
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
       recorder.onstop = () => {
         recording = false;
-        if (widget) widget.talk.textContent = "Hold to talk";
+        const spoken = stopLiveTranscription();
         const blob = new Blob(chunks, { type: chunks[0]?.type || "audio/webm" });
-        if (blob.size) processUtterance(blob);
+        if (blob.size) processUtterance(blob, spoken);
       };
       recorder.start();
       recording = true;
-      recordTimer = setTimeout(stopRecording, 20000);
-      if (widget) widget.talk.textContent = "Stop and send";
-      setStatus("Recording…");
+      startLiveTranscription();
+      recordTimer = setTimeout(stopRecording, VAD_MAX_UTTERANCE_MS);
+      setStatus("Listening…");
     } catch (err) {
       setStatus(`Microphone error: ${err.message}`);
     }
@@ -302,28 +492,52 @@
   function stopRecording() {
     if (recordTimer) { clearTimeout(recordTimer); recordTimer = null; }
     if (recorder && recording) {
-      cooldownUntil = Date.now() + 3000;
+      cooldownUntil = Date.now() + 200;
       recorder.stop();
     }
   }
 
   function vadLoop() {
     if (!stream || !widget) return;
+    const now = Date.now();
     const level = rms();
-    if (busy || Date.now() < cooldownUntil) { vadRaf = requestAnimationFrame(vadLoop); return; }
-    if (speaking && level > 0.12) {
-      if (source) { try { source.stop(); } catch (_) {} }
-      if (controller) controller.abort();
-      speaking = false;
-      setStatus("Interrupted — listening…");
+    if (busy || now < cooldownUntil) { vadRaf = requestAnimationFrame(vadLoop); return; }
+    if (speaking) {
+      bargeInSince = level > 0.15 ? (bargeInSince || now) : 0;
+      if (bargeInSince && now - bargeInSince >= 600) {
+        if (source) { try { source.stop(); } catch (_) {} }
+        if (controller) controller.abort();
+        speaking = false;
+        bargeInSince = 0;
+        setStatus("Interrupted — listening…");
+      }
+    } else {
+      bargeInSince = 0;
     }
-    if (!speaking && !recording && level > 0.045) startRecording();
-    else if (recording && level < 0.02) stopRecording();
+    if (!speaking && !recording) {
+      onsetFrames = level > VAD_SPEECH_RMS ? onsetFrames + 1 : 0;
+      if (onsetFrames >= 2) startRecording();
+    } else if (recording) {
+      if (level >= VAD_SILENCE_RMS) {
+        silenceStartedAt = 0;
+      } else if (!silenceStartedAt) {
+        silenceStartedAt = now;
+      }
+      const pausedFor = silenceStartedAt ? now - silenceStartedAt : 0;
+      const spokeFor = now - speechStartedAt;
+      if ((pausedFor >= VAD_SILENCE_MS && spokeFor >= VAD_MIN_SPEECH_MS)
+          || spokeFor >= VAD_MAX_UTTERANCE_MS) {
+        stopRecording();
+      }
+    }
     vadRaf = requestAnimationFrame(vadLoop);
   }
 
   async function openCall() {
+    if (widget) return;
     try {
+      // Ensure voice turns have a chat conversation to be saved into.
+      window.ChatApp?.ensureConversationId?.();
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
@@ -333,12 +547,13 @@
       micAnalyser.fftSize = 512;
       input.connect(micAnalyser);
       widget = buildWidget();
-      setStatus("Listening…");
-      vadLoop();
-      draw();
+      window.ChatApp?.setVoiceCallActive?.(true);
       button.setAttribute("aria-pressed", "true");
+      setStatus("Ready — start speaking");
+      vadLoop();
+      animateGlobe();
     } catch (err) {
-      widget = buildWidget();
+      if (!widget) widget = buildWidget();
       setStatus(`Microphone unavailable: ${err.message}`);
     }
   }
@@ -353,6 +568,7 @@
     if (audioCtx) audioCtx.close();
     if (widget) widget.wrap.remove();
     widget = null; stream = null; audioCtx = null; micAnalyser = null;
+    window.ChatApp?.setVoiceCallActive?.(false);
     button.setAttribute("aria-pressed", "false");
   }
 

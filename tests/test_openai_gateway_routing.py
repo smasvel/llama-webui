@@ -52,6 +52,23 @@ class OpenAIGatewayRoutingTests(unittest.TestCase):
         self.assertEqual(call.args[1], f"{app.llamacpp.base_url()}/v1/chat/completions")
         self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer engine-key")
 
+    def test_gateway_chat_appears_in_live_logs_as_tailscale(self):
+        client = app.app.test_client()
+        with patch.object(app.llamacpp, "api_key", return_value="engine-key"), \
+             patch.object(app.requests, "request", return_value=_Response()):
+            client.environ_base["REMOTE_ADDR"] = "203.0.113.9"
+            response = client.post(
+                "/v1/chat/completions",
+                json={"model": "llamacpp/local.gguf", "messages": [{"role": "user", "content": "hi"}]},
+                headers={**self.headers, "X-llama_web-Client": "opencode"})
+            response.get_data()
+        self.assertEqual(response.status_code, 200)
+        rows = app.live_requests.snapshot(limit=10)
+        match = next((row for row in rows if row.get("model") == "llamacpp/local.gguf"), None)
+        self.assertIsNotNone(match)
+        self.assertEqual(match["source"], "tailscale")
+        self.assertEqual(match["backend"], "llamacpp")
+
     def test_bad_key_is_rejected(self):
         with patch.object(app.llamacpp, "api_key", return_value="engine-key"):
             response = self.client.post(

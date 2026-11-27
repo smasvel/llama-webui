@@ -14,6 +14,7 @@ import socket
 import subprocess
 import threading
 import time
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
@@ -257,15 +258,40 @@ def parse_caddyfile(path: str = CADDYFILE) -> dict:
     return result
 
 
+SERVER_CERT = Path(__file__).resolve().parents[2] / "certs" / "cert.pem"
+
+
 def ca_certificate() -> str | None:
-    """Caddy's local CA root certificate (the one that must be trusted on the client),
-    fetched from Caddy's admin API — it isn't sent in the served TLS chain."""
+    """PEM certificate clients may need to trust.
+
+    Prefer Caddy's local CA root, but fall back to the certificate actually served
+    by this app (Caddy admin is disabled in the shipped configuration).
+    """
     try:
         r = requests.get(f"{CADDY_ADMIN}/pki/ca/local", timeout=4)
         r.raise_for_status()
-        return (r.json().get("root_certificate") or "").strip() or None
+        value = (r.json().get("root_certificate") or "").strip()
+        if value:
+            return value
     except (requests.RequestException, ValueError):
+        pass
+    try:
+        return SERVER_CERT.read_text().strip() or None
+    except OSError:
         return None
+
+
+def certificate_needs_trust() -> bool:
+    """Only a self-signed certificate must be installed as a trusted root."""
+    pem = ca_certificate()
+    if not pem or "-----BEGIN CERTIFICATE-----" not in pem:
+        return False
+    try:
+        from cryptography import x509
+        cert = x509.load_pem_x509_certificate(pem.encode())
+        return cert.issuer == cert.subject
+    except Exception:
+        return False
 
 
 def ca_trust_commands(ip: str, app_port: int, *, base_url: str | None = None) -> dict[str, str]:
@@ -684,7 +710,10 @@ def _build_uncached(app_port: int = 5443) -> dict:
     ts_enabled = (settings_store.get("tailscale_enabled") or "true") == "true"
     ts_ip = (settings_store.get("tailscale_ip_override") or tailscale_ip()) if ts_enabled else None
     ts_dns = tailscale_dns_name() if ts_enabled else None
-    ts_app = tailscale_app_url(ts_dns, app_port)
+    # Prefer the DNS name: the served Let's Encrypt certificate only covers that
+    # name, so an IP URL fails ERR_TLS_CERT_ALTNAME_INVALID.
+    ts_app = tailscale_app_url(ts_dns, app_port) or (
+        f"https://{ts_dns}:{app_port}" if ts_dns else None)
     ts_links = {name: ts_app + path for name, path in {
         "chat": "/", "models": "/models", "downloads": "/downloads",
         "settings": "/settings", "ca_cert": "/ca-cert",
@@ -692,7 +721,12 @@ def _build_uncached(app_port: int = 5443) -> dict:
 
     # Tailscale devices need their own copy of the CA-trust command: the app listens on
     # 0.0.0.0, so /ca-cert answers on the Tailscale address too.
+    needs_trust = certificate_needs_trust()
+    # Keep the copy/paste trust commands available for clients that still report
+    # an untrusted certificate. With the current public-CA certificate they are
+    # normally unnecessary, but removing them left users without a fix path.
     ts_ca_trust_commands = ca_trust_commands(ts_ip, app_port, base_url=ts_app) if ts_ip else None
+    local_ca_trust_commands = ca_trust_commands(ip, app_port)
 
     return {
         "lan_ip": ip,
@@ -707,10 +741,11 @@ def _build_uncached(app_port: int = 5443) -> dict:
         "ca_cert": cert or "(could not read the CA certificate — is Caddy running? "
                            "check the admin API at localhost:2019)",
         "ca_cert_ok": bool(cert),
-        "ca_trust_commands": ca_trust_commands(ip, app_port),
+        "ca_trust_commands": local_ca_trust_commands,
+        "ca_trust_needed": needs_trust,
         "opencode_config": build_opencode_jsonc(ip, app_port, engine_key, "local"),
         "tailscale_opencode_config": (
-            build_opencode_jsonc(ts_ip or ip, app_port, engine_key, "Tailscale")
-            if ts_ip else None
+            build_opencode_jsonc(ts_dns or ts_ip or ip, app_port, engine_key, "Tailscale")
+            if (ts_ip or ts_dns) else None
         ),
     }

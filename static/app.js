@@ -104,6 +104,7 @@
   let currentConversationId = null;
   let multilineMode = localStorage.getItem("multilineMode") === "1";
   let speakMode = localStorage.getItem("speakMode") === "1";
+  let speakModeBeforeCall = null;
   let generationPollTimer = null;
   let conversationViewVersion = 0;
   let renderedMessagesKey = null;
@@ -699,6 +700,21 @@
     refreshConversations: () => fetchConversations(),
     loadConversation: (id) => loadConversation(id),
     getModel: () => modelSelectEl.value,
+    // The floating voice call owns speech while it is open; prevent the chat
+    // streaming speaker from talking over it.
+    setVoiceCallActive: (active) => {
+      window.__voiceCallActive = !!active;
+      if (active) {
+        if (speakModeBeforeCall === null) speakModeBeforeCall = speakMode;
+        speakMode = false;
+        updateSpeakBtn();
+        cancelChatSpeech();
+      } else if (speakModeBeforeCall !== null) {
+        speakMode = speakModeBeforeCall;
+        speakModeBeforeCall = null;
+        updateSpeakBtn();
+      }
+    },
     // Exposed for integration tests that verify rich reply rendering.
     renderMarkdown: (text) => renderMarkdown(text, true),
   };
@@ -991,7 +1007,8 @@
       (data.messages.at(-1)?.role === "assistant" ? data.messages.at(-1).content : generation.content);
     const spokenText = (reply || "").split("**Pages browsed (screenshots):**")[0];
     const finished = generation.status !== "running";
-    if (playback.shouldSpeak && (generation.status === "running" || generation.status === "completed")) {
+    if (playback.shouldSpeak && !window.__voiceCallActive
+        && (generation.status === "running" || generation.status === "completed")) {
       queueStreamingSpeech(spokenText, playback, finished);
     }
     if (finished) {
@@ -2186,7 +2203,7 @@
       if (currentConversationId !== id || conversationViewVersion !== version) return;
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       generationPlayback = { id: data.generation.id, spokenUpTo: 0, firstChunk: true, pendingSince: null,
-        shouldSpeak: conversationMode || speakMode, finished: false };
+        shouldSpeak: (conversationMode || speakMode) && !window.__voiceCallActive, finished: false };
       scheduleChatRefresh(id, version, 250);
       await fetchConversations();
     } catch (err) {
@@ -2801,6 +2818,7 @@
   }
 
   function queueStreamingSpeech(fullText, playback, finished) {
+    if (window.__voiceCallActive) return;
     const now = performance.now();
     while (playback.spokenUpTo < fullText.length) {
       const tail = fullText.slice(playback.spokenUpTo);

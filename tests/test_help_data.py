@@ -5,6 +5,14 @@ from unittest.mock import Mock, patch
 from llama_web.core import help_data
 
 
+class CertificateHelpTests(unittest.TestCase):
+    @patch.object(help_data.requests, "get", side_effect=help_data.requests.RequestException("admin off"))
+    def test_certificate_falls_back_to_served_pem(self, _get):
+        pem = help_data.ca_certificate()
+        self.assertIn("-----BEGIN CERTIFICATE-----", pem)
+        self.assertFalse(help_data.certificate_needs_trust())
+
+
 class TailscaleHelpTests(unittest.TestCase):
     def setUp(self):
         patcher = patch.object(help_data.zen, "api_key", return_value="")

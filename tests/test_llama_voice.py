@@ -54,6 +54,76 @@ class LlamaVoiceTests(unittest.TestCase):
         self.assertIn(b"[emotion: happy]Hi there", response.data)
         chat.assert_called_once()
 
+    def test_ask_offers_mcp_tools_when_the_request_needs_them(self):
+        seen = {}
+
+        def stream(messages, model, **kwargs):
+            seen["tools"] = kwargs.get("tools")
+            yield 'data: {"choices": [{"delta": {"content": "[emotion: happy] Done."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        with patch.object(app.mcp_tools_client, "chat_tool_mode", return_value="python"), \
+             patch.object(app.mcp_tools_client, "ensure_started", return_value=[
+                 {"function": {"name": "python_repl__execute_python"}}]), \
+             patch.object(app.zen, "chat_stream", side_effect=stream):
+            response = self.client.post(
+                "/api/voice/ask",
+                json={"message": "Run Python to add 2 and 2", "model": "opencode/hy4-flash-free"},
+                headers=self.headers)
+            response.get_data()
+        self.assertEqual(response.status_code, 200)
+        names = [tool["function"]["name"] for tool in seen.get("tools") or []]
+        self.assertIn("python_repl__execute_python", names)
+
+    def test_ask_always_offers_browser_tools_when_web_is_enabled(self):
+        seen = {}
+
+        def stream(messages, model, **kwargs):
+            seen["tools"] = kwargs.get("tools")
+            yield 'data: {"choices": [{"delta": {"content": "[emotion: neutral] Hello."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        original_mode = app.mcp_tools_client.chat_tool_mode
+        with patch.object(app.mcp_tools_client, "chat_tool_mode",
+                          side_effect=lambda text, **kw: None if text == "hello there"
+                          else original_mode(text, **kw)), \
+             patch.object(app.mcp_tools_client, "ensure_started", return_value=[
+                 {"function": {"name": "playwright__browser_snapshot"}},
+                 {"function": {"name": "python_repl__execute_python"}},
+             ]), \
+             patch.object(app.zen, "chat_stream", side_effect=stream):
+            response = self.client.post(
+                "/api/voice/ask",
+                json={"message": "hello there", "model": "opencode/hy4-flash-free"},
+                headers=self.headers)
+            response.get_data()
+        self.assertEqual(response.status_code, 200)
+        names = [tool["function"]["name"] for tool in seen.get("tools") or []]
+        self.assertIn("playwright__browser_snapshot", names)
+        self.assertNotIn("python_repl__execute_python", names)
+
+    def test_ask_persists_both_turns_in_the_chat_conversation(self):
+        from llama_web.storage import chat_store
+        cid = chat_store.new_id()
+        chat_store.ensure_conversation(cid, self.user["id"], "opencode/hy4-flash-free", "hello")
+
+        def stream(messages, model, **kwargs):
+            yield 'data: {"choices": [{"delta": {"content": "[emotion: happy] Persisted reply."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+        with patch.object(app.zen, "chat_stream", side_effect=stream):
+            response = self.client.post(
+                "/api/voice/ask",
+                json={"message": "hello", "model": "opencode/hy4-flash-free",
+                      "conversation_id": cid},
+                headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        response.get_data()  # drain the SSE stream so the generator finalizer runs
+        messages = chat_store.get_conversation(cid, self.user["id"])["messages"]
+        roles = [message["role"] for message in messages]
+        self.assertEqual(roles, ["user", "assistant"])
+        self.assertEqual(messages[0]["content"], "hello")
+        self.assertEqual(messages[1]["content"], "Persisted reply.")
+
     def test_speak_uses_local_tts_and_wav(self):
         wav = io.BytesIO()
         wav.write(b"RIFFfake-wave")

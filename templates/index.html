@@ -116,49 +116,64 @@
             is capped at a value this machine can actually run.
           </p>
 
-          <p class="help-heading">Step 1 — Trust the local certificate</p>
+          <p class="help-heading">Step 1 — Trust the certificate</p>
           <p class="hint">
-            llama-web uses a locally generated HTTPS certificate. Trust it once so your browser
-            stops warning on each visit. The same certificate covers the local addresses below.
+            If a client reports an untrusted certificate, run the command for your OS below.
+            The current certificate is issued by a public CA, so this is normally unnecessary;
+            connect with the DNS name covered by the certificate rather than the IP address.
           </p>
           <p class="hint">Linux:</p>
-          <pre id="help-linux-trust" class="download-log">{{ help.ca_trust_commands.linux }}</pre>
-          <button id="copy-linux-trust" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
+          <div class="code-copy-wrap">
+            <pre id="help-linux-trust" class="download-log">{{ help.ca_trust_commands.linux }}</pre>
+            <button id="copy-linux-trust" class="tiny-copy-btn" type="button" aria-label="Copy Linux trust command" data-tooltip="Copy Linux command">&#128203;</button>
+          </div>
           <p class="hint">macOS:</p>
-          <pre id="help-mac-trust" class="download-log">{{ help.ca_trust_commands.macos }}</pre>
-          <button id="copy-mac-trust" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
+          <div class="code-copy-wrap">
+            <pre id="help-mac-trust" class="download-log">{{ help.ca_trust_commands.macos }}</pre>
+            <button id="copy-mac-trust" class="tiny-copy-btn" type="button" aria-label="Copy macOS trust command" data-tooltip="Copy macOS command">&#128203;</button>
+          </div>
           <p class="hint">Windows:</p>
-          <pre id="help-windows-trust" class="download-log">{{ help.ca_trust_commands.windows }}</pre>
-          <button id="copy-windows-trust" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
+          <div class="code-copy-wrap">
+            <pre id="help-windows-trust" class="download-log">{{ help.ca_trust_commands.windows }}</pre>
+            <button id="copy-windows-trust" class="tiny-copy-btn" type="button" aria-label="Copy Windows trust command" data-tooltip="Copy Windows command">&#128203;</button>
+          </div>
           <details class="advanced">
             <summary>View the certificate</summary>
-            <pre id="help-ca-cert" class="download-log">{{ help.ca_cert }}</pre>
-            <button id="copy-ca-cert" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
+            <div class="code-copy-wrap">
+              <pre id="help-ca-cert" class="download-log">{{ help.ca_cert }}</pre>
+              <button id="copy-ca-cert" class="tiny-copy-btn" type="button" aria-label="Copy CA certificate" data-tooltip="Copy certificate">&#128203;</button>
+            </div>
           </details>
 
           {% if help.tailscale_ip or help.tailscale_app_url %}
           <p class="help-heading">Connect over Tailscale</p>
           <p class="hint">
-            This machine is reachable on its Tailscale address. Open the chat UI there and
-            trust the same certificate on the remote device if it has not been trusted yet.
+            This machine is reachable on its Tailscale address. Open the chat UI there using
+            the DNS name covered by the certificate.
           </p>
           <ul>
             {% if help.tailscale_app_url %}
-            <li><a id="help-tailscale-chat-link" href="{{ help.tailscale_links.chat }}">Chat — {{ help.tailscale_links.chat }}</a></li>
+            <li><a id="help-tailscale-chat-link" href="{{ help.tailscale_links.chat }}">Chat (Tailscale)</a></li>
             <li><a id="help-tailscale-models-link" href="{{ help.tailscale_links.models }}">Models</a></li>
             <li><a id="help-tailscale-downloads-link" href="{{ help.tailscale_links.downloads }}">Downloads</a></li>
             <li><a id="help-tailscale-settings-link" href="{{ help.tailscale_links.settings }}">Settings</a></li>
             {% endif %}
-            <li><a id="help-tailscale-ca_cert-link" href="{{ help.tailscale_links.ca_cert }}">Download the local CA certificate</a></li>
+            <li><a id="help-tailscale-ca_cert-link" href="{{ help.tailscale_links.ca_cert }}">Download the certificate</a></li>
           </ul>
           {% if help.tailscale_ca_trust_commands %}
-          <p class="hint">Trust the certificate on the remote device:</p>
-          <pre id="help-tailscale-linux-trust" class="download-log">{{ help.tailscale_ca_trust_commands.linux }}</pre>
-          <button id="copy-tailscale-linux-trust" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
-          <pre id="help-tailscale-mac-trust" class="download-log">{{ help.tailscale_ca_trust_commands.macos }}</pre>
-          <button id="copy-tailscale-mac-trust" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
-          <pre id="help-tailscale-windows-trust" class="download-log">{{ help.tailscale_ca_trust_commands.windows }}</pre>
-          <button id="copy-tailscale-windows-trust" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
+          <p class="hint">If the remote device reports an untrusted certificate, run its command:</p>
+          <div class="code-copy-wrap">
+            <pre id="help-tailscale-linux-trust" class="download-log">{{ help.tailscale_ca_trust_commands.linux }}</pre>
+            <button id="copy-tailscale-linux-trust" class="tiny-copy-btn" type="button" aria-label="Copy Tailscale Linux trust command" data-tooltip="Copy Linux command">&#128203;</button>
+          </div>
+          <div class="code-copy-wrap">
+            <pre id="help-tailscale-mac-trust" class="download-log">{{ help.tailscale_ca_trust_commands.macos }}</pre>
+            <button id="copy-tailscale-mac-trust" class="tiny-copy-btn" type="button" aria-label="Copy Tailscale macOS trust command" data-tooltip="Copy macOS command">&#128203;</button>
+          </div>
+          <div class="code-copy-wrap">
+            <pre id="help-tailscale-windows-trust" class="download-log">{{ help.tailscale_ca_trust_commands.windows }}</pre>
+            <button id="copy-tailscale-windows-trust" class="tiny-copy-btn" type="button" aria-label="Copy Tailscale Windows trust command" data-tooltip="Copy Windows command">&#128203;</button>
+          </div>
           {% endif %}
           {% endif %}
 
@@ -170,14 +185,18 @@
           </p>
           <details class="advanced" open>
             <summary>Local network</summary>
-            <pre id="help-opencode-config" class="download-log">{{ help.opencode_config }}</pre>
-            <button id="copy-opencode-config" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
+            <div class="code-copy-wrap">
+              <pre id="help-opencode-config" class="download-log">{{ help.opencode_config }}</pre>
+              <button id="copy-opencode-config" class="tiny-copy-btn" type="button" aria-label="Copy local OpenCode config" data-tooltip="Copy local config">&#128203;</button>
+            </div>
           </details>
           {% if help.tailscale_opencode_config %}
           <details class="advanced">
             <summary>Tailscale network</summary>
-            <pre id="help-tailscale-opencode-config" class="download-log">{{ help.tailscale_opencode_config }}</pre>
-            <button id="copy-tailscale-opencode-config" class="tiny-copy-btn" type="button" title="Copy">&#128203;</button>
+            <div class="code-copy-wrap">
+              <pre id="help-tailscale-opencode-config" class="download-log">{{ help.tailscale_opencode_config }}</pre>
+              <button id="copy-tailscale-opencode-config" class="tiny-copy-btn" type="button" aria-label="Copy Tailscale OpenCode config" data-tooltip="Copy Tailscale config">&#128203;</button>
+            </div>
           </details>
           {% endif %}
 

@@ -1,6 +1,7 @@
-"""Local text-to-speech with Piper (no cloud, no Lemonade)."""
+"""Local text-to-speech with Kokoro (preferred) and Piper fallback."""
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import subprocess
@@ -17,8 +18,13 @@ _LOCK = threading.Lock()
 _VOICES: dict[str, Path] = {}
 _CONFIGS: dict[str, Path] = {}
 _REPO = "rhasspy/piper-voices"
-DEFAULT_VOICE = os.environ.get("LLAMA_WEB_TTS_VOICE", "en_US-lessac-medium")
+DEFAULT_VOICE = os.environ.get("LLAMA_WEB_TTS_VOICE", "af_heart")
+KOKORO_DIR = _CACHE_DIR / "kokoro"
+KOKORO_MODEL = KOKORO_DIR / "kokoro-v1.0.onnx"
+KOKORO_VOICES = KOKORO_DIR / "voices-v1.0.bin"
+_kokoro = None
 _VOICE_PATHS = {
+    "en_US-amy-medium": "en/en_US/amy/medium/en_US-amy-medium.onnx",
     "en_US-lessac-medium": "en/en_US/lessac/medium/en_US-lessac-medium.onnx",
     "en_US-lessac-low": "en/en_US/lessac/low/en_US-lessac-low.onnx",
     "en_GB-alan-medium": "en/en_GB/alan/medium/en_GB-alan-medium.onnx",
@@ -48,12 +54,36 @@ def _model_path(voice: str) -> Path:
         return model
 
 
+def _kokoro_instance():
+    global _kokoro
+    if _kokoro is not None:
+        return _kokoro
+    if not (KOKORO_MODEL.is_file() and KOKORO_VOICES.is_file()):
+        return None
+    try:
+        from kokoro_onnx import Kokoro
+        _kokoro = Kokoro(str(KOKORO_MODEL), str(KOKORO_VOICES))
+    except Exception:
+        _kokoro = False
+    return _kokoro or None
+
+
 def synthesize(text: str, voice: str | None = None) -> bytes:
-    """Synthesize text to WAV bytes with the local Piper voice."""
+    """Synthesize text to WAV bytes with local Kokoro (or Piper fallback)."""
     text = (text or "").strip()
     if not text:
         raise VoiceError("No text to speak.")
     voice = voice or DEFAULT_VOICE
+    kokoro = _kokoro_instance()
+    if kokoro is not None and voice not in _VOICE_PATHS:
+        try:
+            import soundfile as sf
+            audio, rate = kokoro.create(text, voice=voice, speed=1.05)
+            out = io.BytesIO()
+            sf.write(out, audio, rate, format="WAV")
+            return out.getvalue()
+        except Exception:
+            pass  # fall through to Piper
     bundled = Path(sys.executable).parent / "piper"
     executable = str(bundled) if bundled.is_file() else shutil.which("piper")
     if not executable:

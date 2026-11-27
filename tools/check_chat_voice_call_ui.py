@@ -40,7 +40,8 @@ with contextlib.ExitStack() as stack:
     with patch.object(app.users_store, "get_user_by_id", return_value=user):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True, args=[
-                "--no-sandbox", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"])
+                "--no-sandbox", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
+                "--use-file-for-fake-audio-capture=/tmp/opencode/voice-pause-fixture.wav"])
             context = browser.new_context(permissions=["microphone"], viewport={"width": 1280, "height": 900})
             page = context.new_page()
             errors = []
@@ -55,8 +56,11 @@ with contextlib.ExitStack() as stack:
                  "state": "loaded", "name": "Local model"},
             ]}))
             page.route("**/api/voice/transcribe", lambda route: route.fulfill(json={"text": "Hello there"}))
-            page.route("**/api/voice/ask", lambda route: route.fulfill(
-                status=200, content_type="text/event-stream", body=ANSWER))
+            ask_payloads = []
+            def answer_route(route):
+                ask_payloads.append(route.request.post_data_json)
+                route.fulfill(status=200, content_type="text/event-stream", body=ANSWER)
+            page.route("**/api/voice/ask", answer_route)
             page.route("**/api/voice/speak", lambda route: route.fulfill(
                 status=200, content_type="audio/wav", body=WAV))
             page.goto(f"http://127.0.0.1:{server.server_port}/")
@@ -65,8 +69,13 @@ with contextlib.ExitStack() as stack:
             page.locator("#conversation-btn").click()
             widget = page.locator(".voice-float")
             expect(widget).to_be_visible()
-            expect(widget.locator("canvas")).to_be_visible()
+            expect(widget.locator(".voice-globe svg")).to_be_visible()
+            expect(widget.locator("select")).to_have_count(0)
+            page.wait_for_timeout(300)
+            debug = page.evaluate("window.__voiceCallDebug()")
+            assert debug["globe"], debug
             expect(page.locator("#conversation-btn")).to_have_attribute("aria-pressed", "true")
+            assert page.evaluate("window.__voiceCallActive === true")
 
             before = widget.bounding_box()
             head = widget.locator(".voice-float-head")
@@ -77,14 +86,20 @@ with contextlib.ExitStack() as stack:
             after = widget.bounding_box()
             assert abs(after["x"] - before["x"]) > 50, (before, after)
 
-            widget.locator("button", has_text="Hold to talk").click()
-            widget.locator("button", has_text="Stop and send").click()
-            expect(widget.locator(".voice-float-caption")).to_contain_text("Hello from the call.")
+            expect(widget.locator("button")).to_have_count(1)
+            expect(widget.locator("button[aria-label='End voice call']")).to_be_visible()
+            page.evaluate("window.__voiceCallTest.send('Hello there')")
+            expect(widget.locator(".voice-float-caption")).to_contain_text(
+                "Hello from the call.", timeout=20000)
             status = widget.locator("p.hint").last.inner_text()
             assert "Error" not in status, status
             assert not errors, errors
+            assert ask_payloads and ask_payloads[0].get("conversation_id"), ask_payloads
+            chat_model = page.locator("#model-select").input_value()
+            assert ask_payloads[0].get("model") == chat_model, (ask_payloads, chat_model)
 
             widget.locator("button[aria-label='End voice call']").click()
             expect(widget).to_have_count(0)
+            assert page.evaluate("window.__voiceCallActive !== true")
             browser.close()
             print("PASS in-chat voice call opens a draggable avatar and completes a mic turn.")

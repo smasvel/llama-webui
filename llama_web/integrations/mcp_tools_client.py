@@ -109,7 +109,8 @@ _CHAT_TOOL_NAMES = {
 _BROWSER_INTENT_RE = re.compile(
     r"\b(?:navigate to|go to|browse|inspect|click|fill|interact with)\b"
     r"|\b(?:open|visit|read)\s+(?:the\s+)?(?:page|website|site|link|url|tab)\b"
-    r"|\b(?:web ?page|website|browser tab|this link|this url|playwright|mcp tools?)\b",
+    r"|\b(?:web ?page|website|browser tab|this link|this url|playwright|mcp tools?)\b"
+    r"|\b(?:live|latest|current|right now|check now|verify|look this up)\b",
     re.IGNORECASE,
 )
 _LIVE_LOOKUP_RE = re.compile(
@@ -121,8 +122,8 @@ _BROWSER_INTERACTION_RE = re.compile(
     r"\b(?:click|fill|type|select|submit|interact with)\b", re.IGNORECASE,
 )
 _PYTHON_INTENT_RE = re.compile(
-    r"\b(?:python|execute code|run code|run a script|analyze this (?:file|csv|dataset)|"
-    r"process this (?:file|csv|dataset))\b",
+    r"\b(?:python|execute code|run code|run a script|calculate|compute|"
+    r"analyze this (?:file|csv|dataset)|process this (?:file|csv|dataset))\b",
     re.IGNORECASE,
 )
 CHAT_TOOL_RESULT_LIMIT = 1400

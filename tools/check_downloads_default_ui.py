@@ -17,7 +17,8 @@ for existing in app.users_store.list_users()["users"]:
     if existing["username"] == NAME:
         app.users_store.delete_user(existing["id"])
 user = app.users_store.create_user(NAME, "test-password", "admin")
-EXPECTED = "https://huggingface.co/models?apps=llama.cpp&other=function-calling&sort=trending"
+EXPECTED = ("https://huggingface.co/models?library=gguf&apps=llama.cpp"
+            "&sort=trending&other=function-calling")
 
 with contextlib.ExitStack() as stack:
     stack.enter_context(patch.dict(app.app.config, {"SESSION_COOKIE_SECURE": False}))
@@ -55,6 +56,7 @@ with contextlib.ExitStack() as stack:
             assert "search=" not in url, url
             assert "apps=llama.cpp" in url, url
             assert "sort=trendingScore" in url, url
-            assert "function-calling" in url, url
+            assert "other=function-calling" in url, url
+            assert "filter=gguf" in url, url
             browser.close()
             print("PASS Downloads defaults to the trending llama.cpp function-calling catalog.")

@@ -1659,8 +1659,60 @@ def openai_compatible_api():
         )
     except requests.RequestException as exc:
         return jsonify({"error": {"message": str(exc), "type": "api_error"}}), 502
+
+    live_id = None
+    if request.path.endswith("/chat/completions"):
+        # Gateway traffic (including Tailscale clients) bypasses the webui chat
+        # worker, so report it to the live feed here. The source label is derived
+        # from the request origin/header; no private address is stored or shown.
+        header_label = (request.headers.get("X-llama_web-Agent-Name")
+                        or request.headers.get("X-llama_web-Client") or "").strip().lower()
+        if request.remote_addr not in ("127.0.0.1", "::1"):
+            # A non-loopback peer is Tailscale/LAN access. Show the network in the
+            # live feed so gateway traffic is distinguishable from webui chat.
+            label = "tailscale"
+        elif re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,47}", header_label):
+            label = header_label
+        else:
+            label = "lan"
+        try:
+            live_id = live_requests.start(
+                source=label,
+                backend="opencode" if hosted else "llamacpp",
+                model=model_id or "unknown",
+                max_tokens=(payload or {}).get("max_tokens") if isinstance(payload, dict) else None,
+                request_content=json.dumps((payload or {}).get("messages") or [])[:4000],
+            )
+        except Exception:
+            live_id = None
+
+    def stream_gateway():
+        buffer = ""
+        try:
+            for chunk in upstream.iter_content(chunk_size=4096):
+                if chunk:
+                    yield chunk
+                    if live_id is not None:
+                        buffer += chunk.decode("utf-8", errors="replace")
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            if not line.startswith("data:"):
+                                continue
+                            try:
+                                event = json.loads(line[5:].strip())
+                                choice = (event.get("choices") or [{}])[0]
+                                text = (choice.get("delta") or {}).get("content") or ""
+                                if text:
+                                    live_requests.update(live_id, delta_chars=len(text), delta_content=text)
+                            except (ValueError, TypeError):
+                                pass
+        finally:
+            if live_id is not None:
+                status = "error" if upstream.status_code >= 400 else "done"
+                live_requests.finish(live_id, status=status, status_code=upstream.status_code)
+
     return Response(
-        stream_with_context(upstream.iter_content(chunk_size=4096)),
+        stream_with_context(stream_gateway()),
         status=upstream.status_code,
         content_type=upstream.headers.get("Content-Type", "application/json"),
     )
@@ -1675,10 +1727,10 @@ def get_ca_cert():
     reason to already be logged into llama_web itself. Still only reachable at all via this app's
     own self-signed HTTPS (or plain LAN network access) - not exposed beyond that."""
     cert = help_data.ca_certificate()
-    if not cert:
-        return jsonify({"error": "could not read the CA certificate — is Caddy running?"}), 502
+    if not cert or "-----BEGIN CERTIFICATE-----" not in cert:
+        return jsonify({"error": "no PEM certificate is available for download"}), 502
     return Response(
-        cert, mimetype="application/x-x509-ca-cert",
+        cert, mimetype="application/x-pem-file",
         headers={"Content-Disposition": 'attachment; filename="llama_web-ca.crt"'},
     )
 
@@ -6168,6 +6220,45 @@ def api_voice_transcribe():
     return jsonify({"text": text})
 
 
+def _voice_tool_context(message: str) -> tuple[list[str], list[dict]]:
+    """Same search/MCP tool selection the typed chat uses, for spoken turns."""
+    notes = []
+    web_enabled = (settings_store.get("web_search_enabled") or "true") == "true"
+    if web_enabled and web_search.should_search_web(message):
+        try:
+            note, _ = _web_search_context(message)
+            if note:
+                notes.append("[Live evidence retrieved by llama_web]\n" + note[:2400]
+                             + "\n[End of live evidence.]")
+        except Exception:
+            pass
+    tools = []
+    try:
+        mode = mcp_tools_client.chat_tool_mode(message) or ""
+        # Playwright's read tools are always offered when web access is on.
+        if web_enabled:
+            mode = "+".join(filter(None, (mode, "browser"))) if mode else "browser"
+        available = mcp_tools_client.ensure_started()
+        prefixes = tuple(
+            prefix for prefix, wanted in (
+                ("playwright__", "browser" in mode),
+                ("python_repl__", "python" in mode),
+            ) if wanted
+        )
+        tools = mcp_tools_client.select_chat_tools(
+            [tool for tool in available
+             if (tool.get("function") or {}).get("name", "").startswith(prefixes)],
+            message if mcp_tools_client.chat_tool_mode(message) else "browse the web",
+            web_evidence_ready=False,
+        )
+    except Exception:
+        tools = []
+    if tools:
+        notes.append("MCP tools are available for this turn. Use them for live browser "
+                     "checks or local Python work; read each result before answering.")
+    return notes, tools
+
+
 @app.post("/api/voice/ask")
 @login_required
 def api_voice_ask():
@@ -6181,34 +6272,115 @@ def api_voice_ask():
     history = body.get("history") or []
     if not isinstance(history, list):
         history = []
+    conversation_id = str(body.get("conversation_id") or "").strip()
+    user_id = session.get("user_id")
+    backend_name = "opencode" if model.startswith("opencode/") else "llamacpp"
+
+    # Voice turns are real chat turns: persist them in the selected conversation
+    # so they appear in the chat transcript like typed messages.
+    if conversation_id and user_id:
+        try:
+            if chat_store.get_conversation(conversation_id, user_id) is None:
+                chat_store.ensure_conversation(conversation_id, user_id, model or None, message)
+            chat_store.add_message(conversation_id, "user", message,
+                                   model=model or None, backend=backend_name)
+        except Exception:
+            conversation_id = ""  # never fail the spoken reply on a storage issue
+
     system = {
         "role": "system",
         "content": ("You are in a spoken voice call. Start every reply with an emotion tag "
                     "like [emotion: happy], [emotion: thoughtful], [emotion: surprised], "
-                    "[emotion: concerned] or [emotion: neutral], then give a short, "
-                    "conversational answer of at most three sentences. Do not use markdown."),
+                    "[emotion: concerned] or [emotion: neutral], then answer naturally and "
+                    "completely out loud. Use the conversation context, acknowledge what the "
+                    "user just said, and ask a brief follow-up question when it keeps the "
+                    "conversation moving. Sound like a thoughtful human assistant, not a "
+                    "list: plain spoken sentences, no markdown, no bullet points, no code."),
     }
+    notes, tools = _voice_tool_context(message)
+    if notes:
+        system["content"] += "\n\n" + "\n\n".join(notes)
     messages = [system] + [m for m in history if isinstance(m, dict)
                            and m.get("role") in ("user", "assistant")][-8:]
     messages.append({"role": "user", "content": message})
 
     def generate():
+        answer_parts = []
         try:
-            if model.startswith("opencode/"):
-                for line in zen.chat_stream(messages, model, temperature=0.7,
-                                            max_tokens=256, user_id=session.get("user_id")):
-                    if line.startswith("data:"):
-                        yield line.rstrip("\n") + "\n\n"
-                return
-            for line in llamacpp.chat_stream(messages, model or llamacpp.request_model_id(),
-                                             temperature=0.7, max_tokens=256):
-                if line.startswith("data:"):
-                    yield line.rstrip("\n") + "\n\n"
-                elif line.strip().startswith("data: [DONE]"):
-                    yield "data: [DONE]\n\n"
+            for _round in range(4):
+                round_parts = []
+                round_answer_start = len(answer_parts)
+                round_calls: dict[int, dict] = {}
+                extra = {"temperature": 0.7, "max_tokens": 768}
+                if tools:
+                    extra["tools"] = tools
+                    extra["parallel_tool_calls"] = True
+                if model.startswith("opencode/"):
+                    stream = zen.chat_stream(messages, model, user_id=user_id, **extra)
+                else:
+                    extra.update({"enable_thinking": False,
+                                  "chat_template_kwargs": {"enable_thinking": False}})
+                    stream = llamacpp.chat_stream(messages, model or llamacpp.request_model_id(), **extra)
+                for line in stream:
+                    if not line.startswith("data:"):
+                        continue
+                    text = line.rstrip("\n")
+                    try:
+                        event = json.loads(text[5:].strip())
+                    except (ValueError, TypeError):
+                        continue
+                    choice = (event.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    for call in delta.get("tool_calls") or []:
+                        idx = call.get("index", 0)
+                        entry = round_calls.setdefault(
+                            idx, {"id": "", "type": "function",
+                                  "function": {"name": "", "arguments": ""}})
+                        if call.get("id"):
+                            entry["id"] = call["id"]
+                        fn = call.get("function") or {}
+                        if fn.get("name"):
+                            entry["function"]["name"] += fn["name"]
+                        if fn.get("arguments"):
+                            entry["function"]["arguments"] += fn["arguments"]
+                    content = delta.get("content") or ""
+                    if content and not round_calls:
+                        round_parts.append(content)
+                        answer_parts.append(content)
+                        if not tools:
+                            # Ordinary conversation: speak as soon as text arrives.
+                            yield "data: " + json.dumps({"choices": [{"delta": {"content": content}}]}) + "\n\n"
+                if not round_calls:
+                    if tools and round_parts:
+                        # Tool rounds may have emitted planning commentary; only
+                        # the final answer should be spoken, so emit it once here.
+                        yield "data: " + json.dumps(
+                            {"choices": [{"delta": {"content": "".join(round_parts)}}]}) + "\n\n"
+                    break
+                # Commentary from a round that requested tools must not be spoken.
+                del answer_parts[round_answer_start:]
+                # Execute each requested tool and feed the result back, exactly as
+                # typed chat does, then let the model answer with that evidence.
+                call_list = [round_calls[i] for i in sorted(round_calls)]
+                messages.append({"role": "assistant", "content": None, "tool_calls": call_list})
+                for call in call_list:
+                    name = call["function"]["name"]
+                    result = mcp_tools_client.call_tool(name, call["function"]["arguments"])
+                    messages.append({"role": "tool", "tool_call_id": call["id"] or f"call_{_round}",
+                                     "content": result})
+            yield "data: [DONE]\n\n"
         except Exception as exc:
             yield "data: " + json.dumps({"error": str(exc)[:300]}) + "\n\n"
             yield "data: [DONE]\n\n"
+        finally:
+            answer = "".join(answer_parts)
+            answer = re.sub(r"^\s*\[emotion:\s*[^\]]+\]\s*", "", answer).strip()
+            if conversation_id and user_id and answer:
+                try:
+                    chat_store.add_message(conversation_id, "assistant", answer,
+                                           model=model or None, backend=backend_name)
+                except Exception:
+                    pass
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-store"})
@@ -6928,7 +7100,9 @@ def api_chat():
                 python_tools_enabled = (settings_store.get("python_tools_enabled") or "true") == "true"
                 # Python runs locally in the app's virtualenv and needs no web search;
                 # keep it on even when live search is disabled.
-                offer_browser_tools = chat_tools_enabled and live_lookup_requested
+                # Keep browser read tools on every turn when web access is enabled,
+                # so the model can look things up even without a keyword trigger.
+                offer_browser_tools = chat_tools_enabled and web_enabled
                 offer_python_tools = python_tools_enabled and "python" in chat_tool_mode
                 if offer_browser_tools or offer_python_tools:
                     try:
@@ -6942,7 +7116,7 @@ def api_chat():
                         tools_list = mcp_tools_client.select_chat_tools(
                             [tool for tool in all_mcp_tools
                              if tool.get("function", {}).get("name", "").startswith(prefixes)],
-                            last_user_message,
+                            last_user_message if chat_tool_mode else "browse the web",
                             # Explicit live lookups must retain the MCP read tools
                             # so the model can verify changing values directly.
                             web_evidence_ready=False,
@@ -6986,10 +7160,9 @@ def api_chat():
                 loop_messages = list(messages)
                 if tools_list:
                     tool_instruction = (
-                        "For general online research, use the live search evidence already supplied in the system "
-                        "context; do not launch a separate sequence of browser tool calls to repeat that research. "
-                        "If llama_web's initial lookup found no verified evidence and browser tools are available, "
-                        "use a targeted read-only lookup for the missing data before answering. "
+                        "Live web tools are available on every turn. Use live search evidence already supplied "
+                        "when it covers the question; otherwise use the browser tools proactively for anything "
+                        "time-sensitive, current, or uncertain rather than answering from memory alone. "
                         "Interact with page controls only when the user explicitly requests that action. Inspect "
                         "each browser result before requesting another read. Check the source, date range, "
                         "interval, and required fields when relevant. If you have enough evidence, stop "

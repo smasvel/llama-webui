@@ -305,6 +305,19 @@ def download_voice_models():
           f'{local_tts.DEFAULT_VOICE} TTS)...')
     local_stt._get_model()
     local_tts._model_path(local_tts.DEFAULT_VOICE)
+    base = ('https://github.com/thewh1teagle/kokoro-onnx/releases/download/'
+            'model-files-v1.0/')
+    for target, filename in ((local_tts.KOKORO_MODEL, 'kokoro-v1.0.onnx'),
+                             (local_tts.KOKORO_VOICES, 'voices-v1.0.bin')):
+        if target.is_file() and target.stat().st_size > 1_000_000:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        print(f'Downloading Kokoro voice asset {filename}...')
+        with requests.get(base + filename, stream=True, timeout=(20, 300)) as response:
+            response.raise_for_status()
+            with target.open('wb') as handle:
+                for chunk in response.iter_content(4 * 1024 * 1024):
+                    handle.write(chunk)
     print('Local voice models are ready.')
 
 

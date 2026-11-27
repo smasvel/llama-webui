@@ -35,6 +35,8 @@ The script installs missing Ubuntu packages, starts PostgreSQL from
   `server.conf`),
 - installs the app and the `llama_web` package into `~/.local/share/llama-web/`,
 - installs the local Playwright MCP runtime and Chromium for browser tools,
+- installs the local voice models (faster-whisper, Kokoro and Piper fallback) under
+  `~/.local/share/llama-web/voice/`; `ffmpeg` must be available on `PATH`,
 - installs and enables the `llama-web.service`, `llama-web-engine.service` and
   `llama-web-caddy.service` user units.
 
@@ -130,40 +132,76 @@ and `PLAYWRIGHT_BROWSERS_PATH` if your tools live elsewhere.
 Browser chat tools require a working Chromium; the Playwright MCP server is
 started in headless mode. The Python REPL uses the application virtualenv.
 
-## Voice call
-
-Click the phone button in the Chat composer to open the voice call. The avatar appears as a
-draggable floating panel above the chat window; click the phone button again or the panel's
-× to end it. Choose either the loaded local llama.cpp model
-or an opencode.ai model in the call's model picker; both go through `/api/voice/ask`.
-Speech recognition uses a local faster-whisper model and speech uses a local Piper voice.
-Neither LM Studio nor Lemonade is involved in the call. The first
-call downloads the STT/TTS models into `~/.local/share/llama-web/voice/`, or the
-installer prefetches them. `ffmpeg` and the `piper` executable must be available.
-
 Live search respects a site's response: pages that return 401/403/404/410/429/451
 or serve a captcha/access-denied page are remembered as unavailable for 30 minutes,
 never retried or worked around, and skipped in favour of the next search result.
+
+## Voice call
+
+Click the phone button in the Chat composer (or open `/voice` directly). The avatar
+appears as a draggable floating panel above the chat window; click the phone button
+again or the panel's × to end the call. The picker uses the current chat model and
+supports both local llama.cpp and opencode.ai models.
+
+- Speech recognition: local faster-whisper; synthesis: local Piper voice.
+- The call uses the model currently selected in Chat; change it there before calling.
+  If that model stalls or returns nothing, the call retries once with the other
+  loaded model before showing an error.
+- The call shows a ChatGPT-style round globe built from inline SVG; it spins gently
+  while listening, faster while the model is thinking or speaking. Voice questions
+  use the same live-search and MCP tool routing as chat: Playwright browser read tools
+  are available on every turn when web search is enabled, calculation/script requests
+  get the local Python tool, and results are fed back before the spoken answer.
+  Detection, transcription and replies run
+  automatically; the only in-panel control is the ×
+  button that ends the call (the Chat phone button toggles it too). While the call is
+  open, the chat's spoken-response mode is muted so only the globe speaks. Status shows
+  "Listening…" only while speech is being captured and "Ready — start speaking"
+  once the reply finishes. Each complete sentence is spoken as it arrives rather
+  than after the full reply. Hosted replies time out after 45 s, local ones after 90 s.
+  No CDN or external
+  image service is used. Override
+  the voice with `LLAMA_WEB_TTS_VOICE` if needed; the default is Kokoro `af_heart`,
+  with local Piper as a fallback.
+  Words appear live as you speak where the browser supports live transcription;
+  the server transcription is the fallback. The status shows "Listening…" rather than "Recording…".
+- Each spoken turn is saved in the current chat conversation and appears in the
+  transcript like a typed message.
+- No LM Studio or Lemonade is involved.
+- A busy lock and cooldown prevent the voice detector from restarting recording
+  while a reply is being processed; speaking interrupts playback.
+- Models are cached under `~/.local/share/llama-web/voice/`. The installer prefetches
+  them; otherwise the first use downloads them. `ffmpeg` and the `piper` executable
+  must be available.
 
 ## Coding agents
 
 Assignments run in an isolated Docker image built from `agent_container/` on
 first use (`llama_web-agent-opencode:<version>`). PostgreSQL stores task state,
-workspace files and checkpoints. The app starts a persistent supervisor; if a
-new assignment reports that the supervisor is not running, restart llama-web:
+workspace files and checkpoints. New assignments default to automatic shell
+permissions and DuckDuckGo online research; both are editable per task.
+
+The `/v1` gateway routes local GGUF ids to llama.cpp and `opencode/...` ids to
+opencode.ai, so hosted assignments run at hosted speed. Online tasks use shorter
+timeouts than local GPU tasks. Gateway requests, including Tailscale clients, are
+shown in **Live logs** with the source label `tailscale`. Generated OpenCode configs
+are shown in the Help panel; the desktop OpenCode config is never rewritten automatically.
+
+The app starts a persistent supervisor. If a new assignment reports that it is not
+running, restart llama-web:
 
 ```bash
 systemctl --user restart llama-web.service
 ```
 
-Generated OpenCode/Continue configurations and their authentication tokens are
-shown in the Help panel. No automatic rewrite of the desktop OpenCode config is
-performed.
+Finished or removed assignments may leave stopped containers; remove them with
+`docker rm -f <container>` if they appear in `docker ps -a`.
 
 ## Backups and maintenance
 
 - Back up PostgreSQL and `~/.config/llama-web/` (secrets and engine config).
-- Model weights in `~/.local/share/llama-web/models/` can be re-downloaded.
+- Model weights in `~/.local/share/llama-web/models/` can be re-downloaded; voice
+  models in `~/.local/share/llama-web/voice/` are also cacheable.
 - Service logs: `journalctl --user -u llama-web.service -f` and
   `journalctl --user -u llama-web-engine.service -f`.
 - Restart everything: `systemctl --user restart llama-web-engine.service llama-web.service llama-web-caddy.service`.
