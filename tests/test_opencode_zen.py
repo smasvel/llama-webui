@@ -92,6 +92,18 @@ class OpenCodeClientTests(unittest.TestCase):
     @patch.object(zen.settings_store, "get", return_value=None)
     @patch.object(zen, "api_key", return_value="test-key")
     @patch.object(zen.requests, "post")
+    def test_chat_forwards_reasoning_effort_for_fast_voice_turns(self, post, _key, _setting):
+        post.return_value = _StreamingResponse([b"data: [DONE]"])
+        list(zen.chat_stream(
+            [{"role": "user", "content": "hello"}],
+            "opencode/hy4-flash-free",
+            reasoning_effort="none",
+        ))
+        self.assertEqual(post.call_args.kwargs["json"]["reasoning_effort"], "none")
+
+    @patch.object(zen.settings_store, "get", return_value=None)
+    @patch.object(zen, "api_key", return_value="test-key")
+    @patch.object(zen.requests, "post")
     def test_chat_stream_preserves_reasoning_delta_fields(self, post, _key, _setting):
         post.return_value = _StreamingResponse([
             b'data: {"choices":[{"delta":{"reasoning":"OpenCode thought"}}]}',

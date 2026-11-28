@@ -6246,15 +6246,9 @@ def _voice_browser_tools() -> list[dict]:
 
 
 def _voice_needs_lookup(message: str) -> bool:
-    """Broad question detection so factual questions get a tool instead of a guess."""
-    if web_search.should_search_web(message):
-        return True
-    social, remainder = web_search._is_social_query(message)
-    if social and not remainder:
-        return False
-    return bool(re.search(
-        r"\?|^\s*(?:what|who|when|where|why|how|which|tell me|find|check|explain|"
-        r"compare|list|name|price|cost|score|result)\b", message, re.I))
+    """Only do live work when the request is current/location/action-oriented."""
+    return (web_search.should_search_web(message)
+            or bool(mcp_tools_client.chat_tool_mode(message)))
 
 
 def _voice_tool_context(message: str) -> tuple[list[str], list[dict]]:
@@ -6264,7 +6258,7 @@ def _voice_tool_context(message: str) -> tuple[list[str], list[dict]]:
     needs_live = web_enabled and _voice_needs_lookup(message)
     if needs_live:
         try:
-            note, _ = _web_search_context(message)
+            note, _ = _web_search_context(message, snippets_only=True)
             if note:
                 notes.append("[Live evidence retrieved by llama_web — verify with a "
                              "browser tool when one is available]\n" + note[:1200]
@@ -6424,7 +6418,8 @@ def api_voice_ask():
                     extra["tools"] = tools
                     extra["parallel_tool_calls"] = True
                 if model.startswith("opencode/"):
-                    stream = zen.chat_stream(messages, model, user_id=user_id, **extra)
+                    stream = zen.chat_stream(messages, model, user_id=user_id,
+                                             reasoning_effort="none", **extra)
                 else:
                     extra.update({"enable_thinking": False,
                                   "chat_template_kwargs": {"enable_thinking": False}})

@@ -169,7 +169,9 @@ automatic.
   "Listening…" only while speech is captured, then "Ready — start speaking".
 - Chat's spoken-response mode is muted while the call is open, so only the globe
   speaks. Each spoken turn is saved in the current chat conversation.
-- All replies use a 90 s timeout. No LM Studio or
+- All replies use a 90 s timeout. Hosted voice turns disable model reasoning for a
+  faster first answer; live lookups use snippet-only search, then a targeted browser
+  check only when the snippets are insufficient. No LM Studio or
   Lemonade is involved.
 - Voice models are cached under `~/.local/share/llama-web/voice/`; the installer
   prefetches them. `ffmpeg` must be available on `PATH`.

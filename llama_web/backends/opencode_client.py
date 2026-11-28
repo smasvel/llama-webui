@@ -219,6 +219,7 @@ def chat_stream(
     session_id: str | None = None,
     parallel_tool_calls: bool | None = None,
     user_id: str | None = None,
+    reasoning_effort: str | None = None,
 ):
     payload = {
         "model": _served_id(model),
@@ -229,6 +230,8 @@ def chat_stream(
     }
     if max_tokens:
         payload["max_tokens"] = max_tokens
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"

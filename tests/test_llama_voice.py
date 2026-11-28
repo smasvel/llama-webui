@@ -118,6 +118,26 @@ class LlamaVoiceTests(unittest.TestCase):
         self.assertIn("decide internally", seen["system"])
         self.assertIn("chat-temp/", seen["system"])
 
+    def test_voice_disables_reasoning_and_uses_snippet_only_search(self):
+        seen = {}
+
+        def stream(messages, model, **kwargs):
+            seen["reasoning_effort"] = kwargs.get("reasoning_effort")
+            yield 'data: {"choices": [{"delta": {"content": "[emotion: neutral] Hi."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        with patch.object(app.web_search, "should_search_web", return_value=True), \
+             patch.object(app, "_web_search_context", return_value=("hint", [])) as search, \
+             patch.object(app.mcp_tools_client, "chat_tool_mode", return_value=None), \
+             patch.object(app.mcp_tools_client, "ensure_started", return_value=[]), \
+             patch.object(app.zen, "chat_stream", side_effect=stream):
+            self.client.post(
+                "/api/voice/ask",
+                json={"message": "latest news", "model": "opencode/hy4-flash-free"},
+                headers=self.headers).get_data()
+        self.assertEqual(seen["reasoning_effort"], "none")
+        search.assert_called_once_with("latest news", snippets_only=True)
+
     def test_ask_offers_browser_tools_for_a_live_lookup_without_explicit_mode(self):
         seen = {}
 
@@ -143,7 +163,7 @@ class LlamaVoiceTests(unittest.TestCase):
         names = [tool["function"]["name"] for tool in seen.get("tools") or []]
         self.assertIn("playwright__browser_navigate", names)
 
-    def test_factual_question_gets_browser_tools_without_a_search_keyword(self):
+    def test_timeless_factual_question_skips_browser_tools_for_fast_answer(self):
         seen = {}
 
         def stream(messages, model, **kwargs):
@@ -151,16 +171,15 @@ class LlamaVoiceTests(unittest.TestCase):
             yield 'data: {"choices": [{"delta": {"content": "[emotion: neutral] Paris."}}]}\n\n'
             yield 'data: [DONE]\n\n'
 
-        with patch.object(app.mcp_tools_client, "ensure_started", return_value=[
-                 {"function": {"name": "playwright__browser_navigate"}}]), \
+        with patch.object(app.mcp_tools_client, "ensure_started", side_effect=AssertionError(
+                 "A timeless factual question must not start the browser")), \
              patch.object(app.zen, "chat_stream", side_effect=stream):
             self.client.post(
                 "/api/voice/ask",
                 json={"message": "What is the capital of France?",
                       "model": "opencode/hy4-flash-free"},
                 headers=self.headers).get_data()
-        names = [tool["function"]["name"] for tool in seen.get("tools") or []]
-        self.assertIn("playwright__browser_navigate", names)
+        self.assertFalse(seen.get("tools"))
 
     def test_refusal_escalates_to_browser_tools_when_none_were_offered(self):
         seen = []
