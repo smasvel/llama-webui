@@ -158,7 +158,9 @@ automatic.
 - Voice questions use the same live-search and MCP tool routing as chat. The assistant
   first decides internally whether the question needs any tool: it answers directly
   from knowledge or supplied live-search evidence when that is enough, and uses the
-  Playwright browser tools only for current, uncertain, or missing facts. Calculation
+  Playwright browser tools only for current, uncertain, or missing facts. Event/venue
+  questions fetch the official calendar page and filter listings against the current
+  weekend dates. Calculation
   and script requests use the local Python tool, and tool results are fed back before
   the spoken answer. That decision is never narrated in the reply.
 - Temporary files created by chat or voice tools go in `chat-temp/`, the git-ignored

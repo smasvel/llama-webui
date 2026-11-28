@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+import app
 from llama_web.integrations import page_scraper, web_search_client as web_search
 
 
@@ -14,6 +15,44 @@ class WebSearchRoutingTests(unittest.TestCase):
 
     def test_news_always_triggers_live_lookup(self):
         self.assertTrue(web_search.should_search_web("Give me the news about semiconductor exports"))
+
+    def test_local_event_question_uses_web_search_not_news(self):
+        query = "What's happening in Zinc House Durham this weekend"
+        self.assertTrue(web_search.looks_like_event_query(query))
+        self.assertFalse(web_search.looks_like_news_query(query))
+        self.assertEqual(web_search.event_search_query(query), "Zinc House Durham events")
+        self.assertEqual(web_search.event_search_query("What's on at Zinc House this weekend"),
+                         "Zinc House events")
+
+    def test_event_site_candidates_include_likely_official_domain(self):
+        candidates = web_search.event_site_candidates(
+            "What's happening in Zinc House Durham this weekend")
+        self.assertIn("https://zinchouse.com/events/", candidates)
+
+    def test_event_result_ranking_prefers_official_calendar(self):
+        query = "What's happening in Zinc House Durham this weekend"
+        official = {"title": "Events for November 2026 – Zinc House Winery & Brewery",
+                    "href": "https://www.zinchouse.com/events/", "body": "Calendar"}
+        social = {"title": "Zinc House Durham Wedding | TikTok",
+                  "href": "https://www.tiktok.com/discover/zinc-house-durham-wedding",
+                  "body": "wedding"}
+        self.assertGreater(web_search.event_result_score(official, query),
+                           web_search.event_result_score(social, query))
+
+    def test_event_context_fetches_the_calendar_even_for_voice_snippets(self):
+        query = "What's happening in Zinc House Durham this weekend"
+        result = {"title": "Events", "href": "https://example.org/events", "body": "stub"}
+        fetched = {"title": "Events", "href": "https://example.org/events",
+                   "full_text": "Sat Nov 28 Food Trucks 5pm"}
+        with patch.object(app.settings_store, "get", return_value=None), \
+             patch.object(web_search, "looks_like_event_query", return_value=True), \
+             patch.object(web_search, "event_search_query", return_value="Zinc House Durham events"), \
+             patch.object(web_search, "search", return_value=[result]) as search, \
+             patch.object(web_search, "fetch_event_urls", return_value=[fetched]) as fetch:
+            note, _ = app._web_search_context(query, snippets_only=True)
+        search.assert_called_once_with("Zinc House Durham events", max_results=10)
+        fetch.assert_called_once()
+        self.assertIn("Sat Nov 28 Food Trucks 5pm", note)
 
     def test_online_topic_research_triggers_live_lookup(self):
         self.assertTrue(web_search.should_search_web("Research solid-state battery progress online"))
@@ -32,6 +71,21 @@ class WebSearchRoutingTests(unittest.TestCase):
                          "find Webb's launch date")
         self.assertEqual(web_search.contextualize_search_query("Research Playwright test fixtures online", []),
                          "Research Playwright test fixtures online")
+
+    def test_event_fetch_uses_http_before_browser(self):
+        with patch.object(web_search, "_fetch_text_http", return_value="Saturday 5pm"), \
+             patch.object(web_search, "fetch_urls_directly") as browser:
+            rows = web_search.fetch_event_urls(["https://example.org/events/"])
+        self.assertEqual(rows[0]["full_text"], "Saturday 5pm")
+        browser.assert_not_called()
+
+    def test_direct_page_fetch_falls_back_to_http_when_browser_text_is_empty(self):
+        from unittest.mock import Mock
+        response = Mock(status_code=200, text="<html><body><h1>Events</h1><p>Saturday 5pm</p></body></html>")
+        with patch.object(page_scraper, "available", return_value=False), \
+             patch.object(web_search.requests, "get", return_value=response):
+            rows = web_search.fetch_urls_directly(["https://example.org/events/"])
+        self.assertIn("Events Saturday 5pm", rows[0]["full_text"])
 
     def test_playwright_reports_launch_failure_without_claiming_pages_were_read(self):
         progress = []

@@ -1035,6 +1035,35 @@ def _web_search_context(query_text: str | None, *, snippets_only: bool = False) 
                 note = web_search.format_for_context(query_text, url_results)
                 return (_browse_framing(note) if note else None), _screenshots_from_results(url_results)
         is_browse_request = web_search.looks_like_browse_request(query_text) and browser_enabled
+        if web_search.looks_like_event_query(query_text):
+            # Venue/event questions need the actual calendar page, not dated news
+            # articles or snippets that often point at last month's event.
+            results = web_search.search(
+                web_search.event_search_query(query_text), max_results=max(10, max_results))
+            page_fetch = (settings_store.get("web_search_browser_enabled") or "true") == "true"
+            if page_fetch:
+                ranked = sorted(results, key=lambda item: web_search.event_result_score(item, query_text),
+                                reverse=True)
+                ranked_urls = [r.get("href") or r.get("url") for r in ranked[:2]
+                               if r.get("href") or r.get("url")]
+                candidate_urls = web_search.event_site_candidates(query_text)[:3]
+                urls = list(dict.fromkeys(candidate_urls + ranked_urls))
+                fetched = web_search.fetch_event_urls(urls)
+                by_url = {r.get("href"): r for r in fetched if r.get("href")}
+                for result in results:
+                    result.update(by_url.get(result.get("href"), {}))
+                # Candidate official pages may not have appeared in DDGS at all.
+                for url in candidate_urls:
+                    if url in by_url and not any(r.get("href") == url for r in results):
+                        results.insert(0, by_url[url])
+                results.sort(key=lambda item: (
+                    bool(item.get("full_text")),
+                    web_search.event_result_score(item, query_text),
+                ), reverse=True)
+            note = web_search.format_for_context(query_text, results, full_text_cap=3000)
+            if note and any((r.get("full_text") or "").strip() for r in results):
+                note = _browse_framing(note)
+            return note, _screenshots_from_results(results)
         results = web_search.search(query_text, max_results=max_results)
         if not browser_enabled or max_pages == 0:
             return web_search.format_for_context(query_text, results), []
@@ -6263,15 +6292,23 @@ def _voice_tool_context(message: str, user_id: str | None = None) -> tuple[list[
         if weather:
             return ["[Verified live weather from Open-Meteo]\n" + weather], []
     needs_live = web_enabled and _voice_needs_lookup(message)
+    full_event_page = False
     if needs_live:
         try:
             note, _ = _web_search_context(message, snippets_only=True)
             if note:
-                notes.append("[Live evidence retrieved by llama_web — verify with a "
-                             "browser tool when one is available]\n" + note[:1200]
+                full_event_page = (web_search.looks_like_event_query(message)
+                                   and note.startswith("llama_web fetched excerpts from live web pages."))
+                notes.append("[Live evidence retrieved by llama_web — analyze this "
+                             "evidence before considering any other source]\n" + note[:6000]
                              + "\n[End of live evidence.]")
         except Exception:
             pass
+    if full_event_page or web_search.looks_like_event_query(message):
+        # Event questions are evidence-first: the official calendar is already
+        # fetched above. If it is insufficient, the weak-answer retry can still
+        # escalate to Playwright, but the model must analyze this evidence first.
+        return notes, []
     tools = []
     try:
         mode = mcp_tools_client.chat_tool_mode(message) or ""
@@ -6382,6 +6419,16 @@ def api_voice_ask():
                     "so the reply can be spoken."),
     }
     notes, tools = _voice_tool_context(message, user_id=user_id)
+    today = datetime.date.today()
+    saturday = (today - datetime.timedelta(days=1) if today.weekday() == 6
+                else today + datetime.timedelta(days=(5 - today.weekday()) % 7))
+    sunday = saturday + datetime.timedelta(days=1)
+    system["content"] += (f"\n\nToday is {today:%Y-%m-%d}. This weekend is "
+                          f"{saturday:%Y-%m-%d} through {sunday:%Y-%m-%d}; ignore "
+                          f"events that have already happened.")
+    if web_search.looks_like_event_query(message):
+        system["content"] += (" For event listings, include performer or vendor names "
+                              "and times from the evidence, not just event categories.")
     # The tool instruction must live in the core prompt: it used to be part of the
     # notes block, which the 600-char evidence cap truncated away, so the model
     # never knew it could call a browser tool.
@@ -6394,8 +6441,9 @@ def api_voice_ask():
                               "before answering. Write any temporary data only in chat-temp/, "
                               "never in the project root. Make this decision silently and speak "
                               "only the verified answer.")
+    evidence_limit = 5000 if web_search.looks_like_event_query(message) else 600
     evidence = "\n\n".join(n for n in notes
-                           if not n.startswith("MCP tools are available"))[:600]
+                           if not n.startswith("MCP tools are available"))[:evidence_limit]
     if evidence:
         system["content"] += "\n\nLive evidence (verify with a tool):\n" + evidence
     messages = [system] + [m for m in history if isinstance(m, dict)

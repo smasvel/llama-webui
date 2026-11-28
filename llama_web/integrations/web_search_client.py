@@ -26,6 +26,7 @@ of vague snippets.
 from __future__ import annotations
 
 import concurrent.futures
+import html
 import re
 from urllib.parse import urlparse
 
@@ -577,6 +578,71 @@ def fetch_exchange_rate(from_code: str, to_code: str, amount: float = 1.0) -> st
 
 
 _NEWS_KEYWORDS = ("news", "headline", "headlines", "current events", "what's happening", "whats happening")
+_EVENT_QUERY_RE = re.compile(
+    r"\b(?:events?|happening|what(?:'s| is) on|weekend|concert|gig|live music|comedy|"
+    r"calendar|lineup)\b", re.I)
+
+
+def looks_like_event_query(query: str | None) -> bool:
+    """Local venue/event listings need web search, not the dated news feed."""
+    return bool(_EVENT_QUERY_RE.search(query or ""))
+
+
+def event_search_query(query: str) -> str:
+    """Turn a spoken venue question into a search-engine-friendly event query."""
+    text = re.sub(
+        r"^\s*(?:what(?:'s| is)\s+(?:happening\s+)?(?:at|in)|what(?:'s| is)\s+on\s+at|"
+        r"tell me about|any)\s+", "", query or "", flags=re.I)
+    text = re.sub(r"\b(?:this|next)\s+weekend\b|\bthis\s+week\b", "", text, flags=re.I)
+    text = re.sub(r"[?!.]+$", "", text)
+    text = " ".join(text.split())
+    if text and "event" not in text.lower():
+        text += " events"
+    return text or (query or "").strip()
+
+
+_EVENT_RANK_STOPWORDS = {
+    "what", "whats", "what's", "is", "are", "the", "a", "an", "in", "at", "on", "for",
+    "this", "next", "weekend", "week", "happening", "events", "event", "tell", "me",
+    "about", "any", "going", "do", "does", "can", "you", "please",
+}
+
+
+def event_site_candidates(query: str) -> list[str]:
+    """Likely official calendar URLs for a named venue, used when search ranking is noisy."""
+    text = re.sub(r"\b(?:events?|calendar)\b", "", event_search_query(query), flags=re.I)
+    words = [word.lower() for word in re.findall(r"[A-Za-z]{3,}", text)
+             if word.lower() not in _EVENT_RANK_STOPWORDS]
+    candidates: list[str] = []
+    for size in (3, 2, 1):
+        if len(words) < size:
+            continue
+        slug = "".join(words[:size])
+        candidates.append(f"https://{slug}.com/events/")
+    return list(dict.fromkeys(candidates))
+
+
+def event_result_score(result: dict, query: str) -> int:
+    """Prefer the venue's own calendar/ticket pages over social/wedding noise."""
+    url = str(result.get("href") or result.get("url") or "").lower()
+    title = str(result.get("title") or "").lower()
+    body = str(result.get("body") or result.get("snippet") or "").lower()
+    words = [word.lower() for word in re.findall(r"[A-Za-z]{3,}", query or "")
+             if word.lower() not in _EVENT_RANK_STOPWORDS]
+    score = sum(6 for word in words if word in url)
+    score += sum(2 for word in words if word in title)
+    score += sum(4 for word in words if word in body)
+    if len(words) >= 2:
+        official_slug = "".join(words[:2])
+        if official_slug in urlparse(url).netloc:
+            score += 20
+    if any(marker in url for marker in ("/events", "/calendar", "/tickets", "/whats-on")):
+        score += 8
+    if any(marker in title for marker in ("events", "calendar", "tickets", "upcoming")):
+        score += 4
+    if any(marker in url for marker in ("tiktok.com", "instagram.com", "facebook.com")):
+        score -= 2
+    return score
 
 
 def looks_like_news_query(query: str) -> bool:
@@ -586,6 +652,8 @@ def looks_like_news_query(query: str) -> bool:
     cbsnews.com/nbcnews.com with generic site-description snippets, no actual headlines —
     nothing for the model to summarize, which is what caused the reported failure)."""
     q = query.lower()
+    if looks_like_event_query(q):
+        return False
     return any(kw in q for kw in _NEWS_KEYWORDS)
 
 
@@ -808,6 +876,36 @@ def extract_urls(query: str | None) -> list[str]:
     return [u.rstrip(".,;:!?)") for u in _URL_RE.findall(query)]
 
 
+def _fetch_text_http(url: str, limit: int = 3000) -> str:
+    """Small fallback for pages whose JS body Playwright cannot extract."""
+    try:
+        response = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+        if response.status_code >= 400:
+            return ""
+        text = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>",
+                      " ", response.text, flags=re.I)
+        text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+        return " ".join(text.split())[:limit]
+    except requests.RequestException:
+        return ""
+
+
+def fetch_event_urls(urls: list[str], max_chars: int = 3000) -> list[dict]:
+    """Event calendars are usually server-rendered: try fast HTTP before Playwright."""
+    results: list[dict] = []
+    pending: list[str] = []
+    for url in urls:
+        text = _fetch_text_http(url, max_chars)
+        if text:
+            results.append({"title": url, "href": url, "body": text[:300],
+                            "full_text": text})
+        else:
+            pending.append(url)
+    if pending:
+        results.extend(fetch_urls_directly(pending, max_chars=max_chars))
+    return results
+
+
 def fetch_urls_directly(urls: list[str], max_chars: int = 3000, screenshot_dir=None, query: str | None = None) -> list[dict]:
     """Fetches URLs pasted directly into the message (see extract_urls) via a real
     headless browser and returns them in the same {title, href, body, full_text} shape
@@ -831,6 +929,8 @@ def fetch_urls_directly(urls: list[str], max_chars: int = 3000, screenshot_dir=N
     for url in urls:
         page = pages.get(url)
         text = page["text"][:max_chars] if page and page.get("text") else ""
+        if not text:
+            text = _fetch_text_http(url, max_chars)
         results.append({
             "title": url, "href": url, "body": text[:300], "full_text": text,
             "screenshot_file": (page or {}).get("screenshot"),
@@ -881,7 +981,7 @@ def enrich_with_full_text(results: list[dict], max_fetch: int = 3, max_chars: in
     return enriched
 
 
-def format_for_context(query: str, results: list[dict]) -> str | None:
+def format_for_context(query: str, results: list[dict], *, full_text_cap: int = 560) -> str | None:
     """Same shape as _recall_memory's output in app.py — a labelled block meant to be
     folded into the system message, hedged so the model treats it as reference material
     it can disagree with or ignore, not ground truth. When any result carries extracted
@@ -906,7 +1006,7 @@ def format_for_context(query: str, results: list[dict]) -> str | None:
         if full_text:
             any_full_text = True
             # Keep multiple sources within llama_web's chat evidence budget.
-            text, cap = full_text, 560
+            text, cap = full_text, full_text_cap
         else:
             text, cap = (r.get("body") or "").strip(), 300
         line = f"- {title} ({href}): {text[:cap]}"
