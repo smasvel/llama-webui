@@ -6251,10 +6251,17 @@ def _voice_needs_lookup(message: str) -> bool:
             or bool(mcp_tools_client.chat_tool_mode(message)))
 
 
-def _voice_tool_context(message: str) -> tuple[list[str], list[dict]]:
+def _voice_tool_context(message: str, user_id: str | None = None) -> tuple[list[str], list[dict]]:
     """Same search/MCP tool selection the typed chat uses, for spoken turns."""
     notes = []
     web_enabled = (settings_store.get("web_search_enabled") or "true") == "true"
+    if web_enabled and web_search.is_live_weather_request(message):
+        # Weather has a deterministic, no-key API path in typed chat. Use it in
+        # voice too: a browser search often lands on a forecast page whose text
+        # the model cannot turn into current conditions.
+        weather = _live_weather_reply(user_id, message, [])
+        if weather:
+            return ["[Verified live weather from Open-Meteo]\n" + weather], []
     needs_live = web_enabled and _voice_needs_lookup(message)
     if needs_live:
         try:
@@ -6374,7 +6381,7 @@ def api_voice_ask():
                     "think out loud, do not show reasoning, no markdown, no lists. Be brief "
                     "so the reply can be spoken."),
     }
-    notes, tools = _voice_tool_context(message)
+    notes, tools = _voice_tool_context(message, user_id=user_id)
     # The tool instruction must live in the core prompt: it used to be part of the
     # notes block, which the 600-char evidence cap truncated away, so the model
     # never knew it could call a browser tool.
@@ -6382,9 +6389,11 @@ def api_voice_ask():
         system["content"] += ("\n\nBefore any tool call, decide internally which route fits: "
                               "answer from knowledge or the supplied live evidence when that "
                               "covers the question; use the browser tool only when the fact is "
-                              "current, uncertain, or missing from that evidence. Write any "
-                              "temporary data only in chat-temp/, never in the project root. "
-                              "Make this decision silently and speak only the verified answer.")
+                              "current, uncertain, or missing from that evidence. After "
+                              "navigating, read the page with browser_snapshot or browser_find "
+                              "before answering. Write any temporary data only in chat-temp/, "
+                              "never in the project root. Make this decision silently and speak "
+                              "only the verified answer.")
     evidence = "\n\n".join(n for n in notes
                            if not n.startswith("MCP tools are available"))[:600]
     if evidence:
@@ -6404,6 +6413,7 @@ def api_voice_ask():
         error_text = ""
         reasoning_fallback = False
         answer_only = False
+        tool_rounds = 0
         last_tool_text = ""
         try:
             for _round in range(4):
@@ -6460,6 +6470,7 @@ def api_voice_ask():
                 if round_calls and not answer_only:
                     call_list = [round_calls[i] for i in sorted(round_calls)]
                     tool_calls += len(call_list)
+                    tool_rounds += 1
                     messages.append({"role": "assistant", "content": None, "tool_calls": call_list})
                     for call in call_list:
                         name = call["function"]["name"]
@@ -6467,22 +6478,41 @@ def api_voice_ask():
                         last_tool_text = mcp_tools_client.compact_chat_tool_result(str(result))
                         messages.append({"role": "tool", "tool_call_id": call["id"] or f"call_{_round}",
                                          "content": last_tool_text})
-                    answer_only = True
-                    # The live check is finished. Ask for a short spoken summary
-                    # instead of letting the model narrate the raw tool result.
-                    messages.append({"role": "system", "content": (
-                        "The live data check is complete. Do not call any more tools. Answer "
-                        "now in one or two short spoken sentences using the verified results. "
-                        "No thinking, no tool names, no markdown and no long lists.")})
+                    answer_only = tool_rounds >= 2
+                    if answer_only:
+                        next_step = (
+                            "The live data check is complete. Do not call any more tools. Answer "
+                            "now in one or two short spoken sentences using the verified results. "
+                            "No thinking, no tool names, no markdown and no long lists.")
+                    else:
+                        next_step = (
+                            "If you only navigated to a page, call browser_snapshot or "
+                            "browser_find now to read its content before answering. Use the page "
+                            "contents to answer in one or two short spoken sentences. Do not "
+                            "narrate tool names or reasoning.")
+                    messages.append({"role": "system", "content": next_step})
                     continue
                 answer = _voice_visible_text("".join(round_parts))
-                if _voice_is_weak_answer(answer) and _round < 3 and not answer_only:
+                if _voice_is_weak_answer(answer) and _round < 3:
+                    if answer_only:
+                        # Tools are already done. A no-reasoning model may still
+                        # refuse after reading them; retry from the results already
+                        # in context instead of accepting the non-answer.
+                        messages.append({"role": "system", "content": (
+                            "The browser result is already in this conversation. Use it "
+                            "now and give the most specific short spoken answer you can. "
+                            "If one detail is missing, name just that detail. Do not say "
+                            "you cannot verify and do not call more tools.")})
+                        continue
                     # Escalate: a question that got no tool the first time now gets
                     # browser tools; one that had tools gets a firmer nudge to use
                     # the results already in the transcript instead of refusing.
+                    had_tools = bool(tools)
                     if not tools:
                         tools = _voice_browser_tools()
                     if tools:
+                        if had_tools:
+                            answer_only = True
                         messages.append({"role": "system", "content": (
                             "Do not refuse or say you cannot verify. Use the available "
                             "browser tools (or the results already in the conversation) "

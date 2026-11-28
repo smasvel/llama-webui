@@ -105,6 +105,7 @@ class LlamaVoiceTests(unittest.TestCase):
             yield 'data: [DONE]\n\n'
 
         with patch.object(app.web_search, "should_search_web", return_value=True), \
+             patch.object(app.web_search, "is_live_weather_request", return_value=False), \
              patch.object(app, "_web_search_context", return_value=("", [])), \
              patch.object(app.mcp_tools_client, "ensure_started", return_value=[
                  {"function": {"name": "playwright__browser_navigate"}}]), \
@@ -148,6 +149,7 @@ class LlamaVoiceTests(unittest.TestCase):
 
         original_mode = app.mcp_tools_client.chat_tool_mode
         with patch.object(app.web_search, "should_search_web", return_value=True), \
+             patch.object(app.web_search, "is_live_weather_request", return_value=False), \
              patch.object(app, "_web_search_context", return_value=("some live hint", [])), \
              patch.object(app.mcp_tools_client, "chat_tool_mode",
                           side_effect=lambda text, **kw: None if text == "check the weather in Durham nc"
@@ -162,6 +164,28 @@ class LlamaVoiceTests(unittest.TestCase):
                 headers=self.headers).get_data()
         names = [tool["function"]["name"] for tool in seen.get("tools") or []]
         self.assertIn("playwright__browser_navigate", names)
+
+    def test_weather_voice_uses_open_meteo_without_browser(self):
+        seen = {}
+
+        def stream(messages, model, **kwargs):
+            seen["tools"] = kwargs.get("tools")
+            seen["system"] = messages[0]["content"]
+            yield 'data: {"choices": [{"delta": {"content": "[emotion: neutral] Sunny, 72F."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        with patch.object(app.web_search, "is_live_weather_request", return_value=True), \
+             patch.object(app, "_live_weather_reply", return_value="Sunny, 72F in Durham.") as weather, \
+             patch.object(app.mcp_tools_client, "ensure_started", side_effect=AssertionError(
+                 "Weather must use Open-Meteo, not the browser")), \
+             patch.object(app.zen, "chat_stream", side_effect=stream):
+            self.client.post(
+                "/api/voice/ask",
+                json={"message": "weather in Durham", "model": "opencode/hy4-flash-free"},
+                headers=self.headers).get_data()
+        self.assertFalse(seen["tools"])
+        self.assertIn("Verified live weather from Open-Meteo", seen["system"])
+        weather.assert_called_once()
 
     def test_timeless_factual_question_skips_browser_tools_for_fast_answer(self):
         seen = {}
@@ -219,6 +243,49 @@ class LlamaVoiceTests(unittest.TestCase):
         self.assertTrue(any((tool or {}).get("function", {}).get("name") ==
                             "playwright__browser_navigate" for tool in seen[1] or []))
 
+    def test_weak_answer_after_tools_retries_from_existing_results(self):
+        rounds = []
+
+        def first(messages, model, **kwargs):
+            rounds.append(kwargs.get("tools"))
+            yield ('data: {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", '
+                   '"type": "function", "function": {"name": "playwright__browser_navigate", '
+                   '"arguments": "{}"}}]}, "finish_reason": "tool_calls"}]}\n\n')
+            yield 'data: [DONE]\n\n'
+
+        def second(messages, model, **kwargs):
+            rounds.append(kwargs.get("tools"))
+            yield ('data: {"choices": [{"delta": {"content": '
+                   '"[emotion: neutral] I couldn\'t verify the result."}}]}\n\n')
+            yield 'data: [DONE]\n\n'
+
+        def third(messages, model, **kwargs):
+            rounds.append(kwargs.get("tools"))
+            yield ('data: {"choices": [{"delta": {"content": '
+                   '"[emotion: neutral] It is sunny in Durham."}}]}\n\n')
+            yield 'data: [DONE]\n\n'
+
+        streams = [first, second, third]
+
+        def fake_chat(messages, model, **kwargs):
+            return streams.pop(0)(messages, model, **kwargs)
+
+        with patch.object(app.web_search, "should_search_web", return_value=True), \
+             patch.object(app.web_search, "is_live_weather_request", return_value=False), \
+             patch.object(app, "_web_search_context", return_value=("", [])), \
+             patch.object(app.mcp_tools_client, "ensure_started", return_value=[
+                 {"function": {"name": "playwright__browser_navigate"}}]), \
+             patch.object(app.mcp_tools_client, "call_tool", return_value="Sunny in Durham"), \
+             patch.object(app.zen, "chat_stream", side_effect=fake_chat):
+            response = self.client.post(
+                "/api/voice/ask",
+                json={"message": "weather in Durham", "model": "opencode/hy4-flash-free"},
+                headers=self.headers)
+        self.assertIn(b"It is sunny in Durham.", response.data)
+        self.assertTrue(rounds[0])
+        self.assertTrue(rounds[1])  # second research round may read the page
+        self.assertFalse(rounds[2])  # weak-answer retry is answer-only
+
     def test_tool_only_stream_still_produces_a_spoken_answer(self):
         def tool_stream(messages, model, **kwargs):
             yield ('data: {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", '
@@ -227,6 +294,7 @@ class LlamaVoiceTests(unittest.TestCase):
             yield 'data: [DONE]\n\n'
 
         with patch.object(app.web_search, "should_search_web", return_value=True), \
+             patch.object(app.web_search, "is_live_weather_request", return_value=False), \
              patch.object(app, "_web_search_context", return_value=("", [])), \
              patch.object(app.mcp_tools_client, "ensure_started", return_value=[
                  {"function": {"name": "playwright__browser_navigate"}}]), \
@@ -331,7 +399,7 @@ class LlamaVoiceTests(unittest.TestCase):
         self.assertNotIn("Let me check the web", data)
         self.assertNotIn("I will look that up now", data)
         self.assertIn("The page says it is sunny.", data)
-        self.assertIn("The live data check is complete", json.dumps(calls[1]))
+        self.assertIn("browser_snapshot", json.dumps(calls[1]))
         self.assertIn("omitted to fit model context", json.dumps(calls[1]))
 
     def test_ask_persists_both_turns_in_the_chat_conversation(self):
