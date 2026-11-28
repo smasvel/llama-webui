@@ -12,7 +12,11 @@ namespace = {"__name__": "__llama_web_repl__"}
 
 @mcp.tool()
 def execute_python(code: str) -> str:
-    """Execute Python locally, retaining variables between calls; return output."""
+    """Execute Python locally, retaining variables between calls; return output.
+
+    The working directory is the git-ignored chat-temp/ folder. Write temporary
+    files and scratch data there, never in the project root or source folders.
+    """
     output = io.StringIO()
     try:
         tree = ast.parse(code)

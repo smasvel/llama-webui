@@ -74,15 +74,22 @@ _PLAYWRIGHT_MCP_CLI = _first_existing(
     [base / "mcp/node_modules/@playwright/mcp/cli.js" for base in _DATA_DIRS]
 )
 
+# Chat/MCP tools run with this as their working directory. It is git-ignored, so
+# scratch data the model creates (JSON dumps, screenshots, Python results) lands
+# here instead of in the application source tree.
+CHAT_TEMP_DIR = Path(__file__).resolve().parents[2] / "chat-temp"
+
 _SERVERS = {
     "playwright": StdioServerParameters(
         command=os.environ.get("LLAMA_WEB_NODE_BIN", _NODE_BIN),
         args=[os.environ.get("LLAMA_WEB_PLAYWRIGHT_MCP_CLI", _PLAYWRIGHT_MCP_CLI), "--headless", "--browser", "chromium", "--executable-path", _chromium_path()],
         env={**get_default_environment(), "DISPLAY": os.environ.get("DISPLAY", ":2")},
+        cwd=str(CHAT_TEMP_DIR),
     ),
     "python_repl": StdioServerParameters(
         command=sys.executable,
         args=[str(Path(__file__).resolve().parents[2] / "tools/python_repl_mcp.py")],
+        cwd=str(CHAT_TEMP_DIR),
     ),
 }
 
@@ -274,6 +281,7 @@ def ensure_started() -> list[dict]:
     call from any thread, any number of times - callers don't need to know whether this
     is the first call."""
     global _loop, _loop_thread, _openai_tools_cache
+    CHAT_TEMP_DIR.mkdir(parents=True, exist_ok=True)
     with _init_lock:
         if _openai_tools_cache is not None:
             return _openai_tools_cache

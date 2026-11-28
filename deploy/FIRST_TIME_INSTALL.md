@@ -158,6 +158,9 @@ automatic.
   Playwright browser tools only for current, uncertain, or missing facts. Calculation
   and script requests use the local Python tool, and tool results are fed back before
   the spoken answer. That decision is never narrated in the reply.
+- Temporary files created by chat or voice tools go in `chat-temp/`, the git-ignored
+  working directory of the Playwright and Python MCP servers. Scratch data is never
+  written into the project root or source folders.
 - The spoken turn is kept short: the reply is capped, thinking text is removed, and
   long captions scroll inside the panel instead of resizing it. Status shows
   "Listening…" only while speech is captured, then "Ready — start speaking".

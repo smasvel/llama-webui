@@ -104,6 +104,7 @@ class ChatToolsSettingTests(unittest.TestCase):
             self.assertIn("Before calling any tool", seen["system"])
             self.assertIn("decide internally", seen["system"])
             self.assertIn("never narrate", seen["system"])
+            self.assertIn("chat-temp/", seen["system"])
         finally:
             users_store.delete_user(user["id"])
 

@@ -116,6 +116,7 @@ class LlamaVoiceTests(unittest.TestCase):
                 headers=self.headers).get_data()
         self.assertIn("Before any tool call", seen["system"])
         self.assertIn("decide internally", seen["system"])
+        self.assertIn("chat-temp/", seen["system"])
 
     def test_ask_offers_browser_tools_for_a_live_lookup_without_explicit_mode(self):
         seen = {}

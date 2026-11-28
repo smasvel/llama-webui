@@ -38,6 +38,9 @@ backups/
 *.pem
 *.key
 
+# Scratch data created by chat/voice MCP tools (git-ignored working directory)
+/chat-temp/
+
 # Local scratch artifacts from online/remote search probes
 /*-yahoo-*.json
 /*-remote-search-*.json

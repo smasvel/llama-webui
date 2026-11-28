@@ -6388,8 +6388,9 @@ def api_voice_ask():
         system["content"] += ("\n\nBefore any tool call, decide internally which route fits: "
                               "answer from knowledge or the supplied live evidence when that "
                               "covers the question; use the browser tool only when the fact is "
-                              "current, uncertain, or missing from that evidence. Make this "
-                              "decision silently and speak only the verified answer.")
+                              "current, uncertain, or missing from that evidence. Write any "
+                              "temporary data only in chat-temp/, never in the project root. "
+                              "Make this decision silently and speak only the verified answer.")
     evidence = "\n\n".join(n for n in notes
                            if not n.startswith("MCP tools are available"))[:600]
     if evidence:
@@ -7376,7 +7377,11 @@ def api_chat():
                         "interval, and required fields when relevant. If you have enough evidence, stop "
                         "browsing and answer the user's request. If a specific item is missing, make one "
                         "targeted follow-up. If the evidence is insufficient, summarize what you verified "
-                        "and name the missing information. Never invent data points or claim a chart was rendered."
+                        "and name the missing information. Never invent data points or claim a chart was rendered. "
+                        "When a tool or your answer creates temporary files or scratch data (JSON dumps, CSVs, "
+                        "screenshots, downloaded pages, Python output), write them only inside the chat-temp/ "
+                        "folder, which is the MCP tools' working directory. Never put scratch files in the "
+                        "project root or any source directory."
                     )
                     if live_lookup_requested:
                         tool_instruction += (
