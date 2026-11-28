@@ -39,24 +39,69 @@
   let recognition = null;
   let liveTranscript = "";
   let pendingSpeech = "";
+  // Text that was actually spoken by the incremental queue. The end-of-turn path
+  // uses this to speak anything the streaming path dropped.
+  let spokenText = "";
   let speechChain = Promise.resolve();
-  let streamedSpoken = false;
-  let speechGeneration = 0;
   let lastSpokenText = "";
+
+  function voiceLog(event, fields = {}) {
+    const payload = {
+      event,
+      conversation_id: window.ChatApp?.getConversationId?.() || "",
+      model: document.getElementById("model-select")?.value || "",
+      ...fields,
+    };
+    console.debug("[voice]", event, payload);
+    try {
+      fetch("/api/voice/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(() => { /* diagnostics must never break the call */ });
+    } catch (_) { /* nothing to do */ }
+  }
 
   function queueSpeak(text) {
     const clean = cleanText(text);
-    if (!clean || clean === lastSpokenText) return;
+    if (!clean || clean === lastSpokenText) {
+      voiceLog("skipped_duplicate", { answer_chars: clean.length, preview: clean });
+      return;
+    }
     lastSpokenText = clean;
-    streamedSpoken = true;
-    const generation = speechGeneration;
     speechChain = speechChain.then(async () => {
-      if (generation !== speechGeneration) return;
       setStatus("Speaking…");
-      await speak(clean);
+      try {
+        const didSpeak = await speak(clean);
+        if (didSpeak) {
+          // Only count text whose audio actually completed. Chunks dropped by a
+          // retry or a barge-in must be spoken again at the end of the turn.
+          spokenText += clean + " ";
+          voiceLog("spoken", { spoken_chars: clean.length, preview: clean });
+        } else {
+          voiceLog("skipped_busy", { answer_chars: clean.length, preview: clean });
+        }
+      } catch (error) {
+        setStatus(`Speech failed: ${error.message || error}`);
+        voiceLog("speech_error", { answer_chars: clean.length,
+                                  preview: `${error.message || error} | ${clean}` });
+      }
       // Small pause between sentences so consecutive clips never sound overlapped.
       await new Promise((resolve) => setTimeout(resolve, 180));
     });
+  }
+
+  function discardQueuedSpeech() {
+    if (spokenText.trim()) {
+      voiceLog("discarded_speech", { spoken_chars: spokenText.trim().length,
+                                     preview: spokenText });
+    }
+    if (source) { try { source.stop(); } catch (_) { /* already stopped */ } }
+    speechChain = Promise.resolve();
+    spokenText = "";
+    pendingSpeech = "";
+    window.__voiceSpeakerBusy = false;
   }
   let blinkUntil = 0;
   let nextBlink = Date.now() + 2000;
@@ -100,7 +145,8 @@
     const status = el("p", "hint", "Connecting…");
     status.style.cssText = "margin:8px 10px 4px;min-height:1.2em;";
     const caption = el("p", "voice-float-caption", "");
-    caption.style.cssText = "margin:0 10px 14px;min-height:2.6em;font-size:13px;line-height:1.4;";
+    caption.style.cssText = ("margin:0 10px 14px;min-height:2.6em;max-height:7em;"
+      + "overflow-y:auto;overflow-wrap:anywhere;font-size:13px;line-height:1.4;");
 
     wrap.append(head, globe, status, caption);
     document.body.appendChild(wrap);
@@ -137,6 +183,18 @@
 
   function setStatus(text) { if (widget) widget.status.textContent = text; }
   function setCaption(text) { if (widget) widget.caption.textContent = text; }
+
+  // Keep the floating call caption small: only the tail of a long reply is shown
+  // and thinking/tool markup is removed before it reaches the screen.
+  function shortCaption(text) {
+    let value = String(text || "")
+      .replace(/<think>[\s\S]*?<\/think>/gi, "")
+      .replace(/<\/?think\s*>/gi, "")
+      .replace(/🔧\s*\*Calling[^*]*\*/g, "")
+      .trim();
+    if (value.length > 240) value = "…" + value.slice(-240);
+    return value;
+  }
 
   function rms() {
     if (!micAnalyser) return 0;
@@ -260,9 +318,9 @@
     pendingSpeech = "";
     controller = new AbortController();
     const model = modelOverride || document.getElementById("model-select")?.value || "";
-    // Keep the spoken turn responsive: hosted reasoning is usually a few seconds,
-    // local GGUFs get a little longer. Never leave the user in "Thinking…" for minutes.
-    const budget = model.startsWith("opencode/") ? 45000 : 90000;
+    // Hosted turns can run tool rounds (live lookups) before they answer, so a
+    // short budget used to abort a healthy reply and trigger a pointless retry.
+    const budget = 90000;
     const timeout = setTimeout(() => controller.abort(new Error("No response from the model.")), budget);
     askTimeout = timeout;
     const conversationId = window.ChatApp?.getConversationId?.() || "";
@@ -311,9 +369,12 @@
           const event = JSON.parse(payload);
           if (event.error) throw new Error(event.error);
           const choice = (event.choices || [])[0] || {};
-          const delta = event.content || (choice.delta?.content || "") || "";
+          const rawDelta = event.content || (choice.delta?.content || "") || "";
+          const delta = rawDelta.replace(/<think>[\s\S]*?<\/think>/gi, "")
+                                .replace(/<\/?think\s*>/gi, "")
+                                .replace(/🔧\s*\*Calling[^*]*\*/g, "");
           answer += delta;
-          setCaption(answer);
+          setCaption(shortCaption(answer));
           // Speak each complete sentence as soon as it arrives instead of waiting
           // for the whole reply to finish streaming.
           if (onSentence && delta) {
@@ -337,8 +398,11 @@
   }
 
   async function speak(text) {
-    if (window.__voiceSpeakerBusy) return;
+    if (window.__voiceSpeakerBusy) return false;
     window.__voiceSpeakerBusy = true;
+    let finished = false;
+    let resolvePlayback;
+    const playbackDone = new Promise((resolve) => { resolvePlayback = resolve; });
     try {
       const response = await fetch("/api/voice/speak", {
         method: "POST",
@@ -357,17 +421,24 @@
       player.connect(analyser);
       analyser.connect(audioCtx.destination);
       source = player;
+      // Keep the mic from treating the speaker's own audio as a barge-in. Without
+      // this, echo trips the VAD about 600ms into playback and only the first few
+      // words of the reply are ever heard.
+      cooldownUntil = Date.now() + Math.min(120000, (buffer.duration || 30) * 1000) + 800;
       const finish = () => {
+        if (finished) return;
+        finished = true;
         if (source === player) { speaking = false; source = null; }
         speechRms = 0;
         window.__voiceSpeakerBusy = false;
         cooldownUntil = Date.now() + 800;
         setStatus("Ready — start speaking");
+        resolvePlayback(true);
       };
       player.onended = finish;
       speaking = true;
       player.start();
-      setTimeout(() => { if (window.__voiceSpeakerBusy && source === player) finish(); },
+      const safety = setTimeout(finish,
         Math.min(120000, (buffer.duration || 30) * 1000 + 2000));
       const meter = () => {
         if (source !== player || !speaking) return;
@@ -375,8 +446,17 @@
         requestAnimationFrame(meter);
       };
       meter();
+      // Wait for the audio to actually finish. Resolving at player.start() let
+      // the next queued sentence hit the busy guard and be silently dropped.
+      await playbackDone;
+      clearTimeout(safety);
+      return true;
     } catch (error) {
-      window.__voiceSpeakerBusy = false;
+      if (!finished) {
+        finished = true;
+        window.__voiceSpeakerBusy = false;
+        resolvePlayback(false);
+      }
       throw error;
     }
   }
@@ -400,19 +480,32 @@
     if (busy) return;
     busy = true;
     lastSpokenText = "";
+    const turnStarted = performance.now();
     setStatus("Transcribing…");
     try {
-      const userText = (liveText || "").trim() || await transcribe(blob);
+      // The browser Web Speech API mishears accented/mixed-language speech and its
+      // language is tied to navigator.language. The local Whisper model handles
+      // that better, so it is primary; the live transcript is only a fallback.
+      let sttSource = "server";
+      let userText = "";
+      try {
+        userText = await transcribe(blob);
+      } catch (error) {
+        sttSource = "browser-fallback";
+        userText = (liveText || "").trim();
+        voiceLog("stt_fallback", { preview: String(error.message || error) });
+      }
       if (!userText.trim()) {
         setCaption("Didn't catch that — please try again.");
         setStatus("Ready — start speaking");
         return;
       }
-      setCaption(`You: ${userText}`);
+      setCaption(shortCaption(`You: ${userText}`));
       setStatus("Thinking…");
+      voiceLog("turn_start", { answer_chars: userText.length, preview: userText,
+                               stt_source: sttSource });
       let raw = "";
-      streamedSpoken = false;
-      speechGeneration += 1;
+      discardQueuedSpeech();
       const selected = document.getElementById("model-select")?.value || "";
       // Stay on the model the user chose. Give it up to two attempts with a
       // longer timeout rather than silently switching to a different model.
@@ -420,16 +513,22 @@
         try {
           if (attempt) {
             setStatus(`Retrying with ${modelLabel(selected)}…`);
-            speechGeneration += 1; // stop any speech from the stalled attempt
+            discardQueuedSpeech(); // stop and forget speech from the stalled attempt
+            voiceLog("retry", { elapsed_ms: Math.round(performance.now() - turnStarted),
+                                preview: userText });
           }
           raw = await ask(userText, selected, queueSpeak);
           if (cleanText(raw)) break;
-        } catch (_) {
+        } catch (err) {
+          voiceLog("ask_error", { elapsed_ms: Math.round(performance.now() - turnStarted),
+                                  preview: String(err.message || err) });
           raw = "";
         }
       }
       const text = cleanText(raw);
-      setCaption(text || "(no reply)");
+      voiceLog("answer_ready", { elapsed_ms: Math.round(performance.now() - turnStarted),
+                                 answer_chars: text.length, preview: text });
+      setCaption(shortCaption(text) || "(no reply)");
       // The server persisted both turns in the current chat conversation; show them.
       try {
         await window.ChatApp?.refreshConversations?.();
@@ -438,18 +537,39 @@
       } catch (_) { /* voice call still works if the chat view is unavailable */ }
       history.push({ role: "user", content: userText }, { role: "assistant", content: text });
       history = history.slice(-8);
-      if (text && streamedSpoken) {
+      if (text) {
         if (pendingSpeech.trim()) queueSpeak(pendingSpeech);
+        // Wait for everything the streaming path queued, then speak any part of
+        // the final answer that was not actually spoken. Chunks can be lost when
+        // a retry resets the queue, so this is what guarantees the full reply.
         await speechChain;
-      } else if (text) {
-        setStatus("Speaking…");
-        await speak(text);
+        const full = cleanText(text);
+        const said = spokenText.trim();
+        let remainder = full.trim();
+        if (said && remainder.toLowerCase().startsWith(said.toLowerCase())) {
+          remainder = remainder.slice(said.length).trim();
+        }
+        const left = remainder.length;
+        voiceLog("coverage", { elapsed_ms: Math.round(performance.now() - turnStarted),
+                               answer_chars: full.length, spoken_chars: said.length,
+                               left_chars: left, preview: remainder || full });
+        if (remainder) {
+          setStatus("Speaking…");
+          const didSpeak = await speak(remainder);
+          voiceLog(didSpeak ? "remainder_spoken" : "remainder_skipped", {
+            left_chars: left, preview: remainder,
+            elapsed_ms: Math.round(performance.now() - turnStarted),
+          });
+        }
       }
+      voiceLog("turn_done", { elapsed_ms: Math.round(performance.now() - turnStarted) });
       setStatus("Ready — start speaking");
     } catch (err) {
       if (askTimeout) clearTimeout(askTimeout);
       askTimeout = null;
       const message = String(err.message || "");
+      voiceLog("turn_error", { elapsed_ms: Math.round(performance.now() - turnStarted),
+                               preview: message });
       if (/speech|transcri|no transcript/i.test(message)) {
         setStatus("Ready — start speaking");
         setCaption("I didn't catch that — please say it once more.");
@@ -503,8 +623,8 @@
     const level = rms();
     if (busy || now < cooldownUntil) { vadRaf = requestAnimationFrame(vadLoop); return; }
     if (speaking) {
-      bargeInSince = level > 0.15 ? (bargeInSince || now) : 0;
-      if (bargeInSince && now - bargeInSince >= 600) {
+      bargeInSince = level > 0.32 ? (bargeInSince || now) : 0;
+      if (bargeInSince && now - bargeInSince >= 1000) {
         if (source) { try { source.stop(); } catch (_) {} }
         if (controller) controller.abort();
         speaking = false;

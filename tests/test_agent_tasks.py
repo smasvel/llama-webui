@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from llama_web.agents.agent_tasks import (
     Manager, MARKER, FIRST_TOKEN_TIMEOUT, PROGRESS_TIMEOUT, HANDOFF_TIMEOUT,
     ONLINE_FIRST_TOKEN_TIMEOUT, ONLINE_PROGRESS_TIMEOUT, ONLINE_HANDOFF_TIMEOUT,
-    is_online_model, response_wait_timeout,
+    is_online_model, response_wait_timeout, is_context_overflow,
 )
 import app
 
@@ -43,6 +43,19 @@ class AgentTimeoutTests(unittest.TestCase):
         self.assertEqual(Manager._model_label(
             {'model': {'providerID': 'llamacpp', 'id': 'llamacpp/model.gguf'}}),
             'local llama.cpp model')
+
+
+class ContextOverflowDetectionTests(unittest.TestCase):
+    def test_recognizes_upstream_context_limit_error(self):
+        message = ('Error: Upstream request failed: [400003] '
+                   'Input tokens exceed the model context limit.')
+        self.assertTrue(is_context_overflow(message))
+        self.assertTrue(is_context_overflow({'type': 'provider.error', 'message': message}))
+
+    def test_does_not_misclassify_other_upstream_failures(self):
+        self.assertFalse(is_context_overflow(
+            {'type': 'provider.error', 'message': 'Upstream request failed: [400401] invalid api key'}))
+        self.assertFalse(is_context_overflow('provider transport error: socket reset'))
 
 
 class AgentTaskTests(unittest.TestCase):
@@ -503,6 +516,23 @@ class AgentTaskTests(unittest.TestCase):
         self.assertEqual(resumed['session_id'], 'ses_fresh')
         self.assertFalse(resumed['retry_current_cycle'])
         self.assertEqual(self.client.create.call_count, 2)
+
+    def test_upstream_context_limit_error_restarts_in_a_fresh_session(self):
+        key = self.create()
+        self.client.create.side_effect = ['ses_fresh']
+        self.snap['messages'] = [assistant('upstream-too-long', '', error={
+            'type': 'provider.error',
+            'message': ('Error: Upstream request failed: [400003] '
+                        'Input tokens exceed the model context limit.'),
+        })]
+        self.manager.tick()
+        self.manager.tick()
+        retry = self.manager.get(key)
+        self.assertEqual(retry['status'], 'running')
+        self.assertIsNone(retry['session_id'])
+        self.assertTrue(retry['retry_current_cycle'])
+        self.assertIn('fresh OpenCode session', retry['pending_prompt']['text'])
+        self.assertEqual(retry['context_overflow_recovery_attempts'], 1)
 
     def test_compaction_failure_recovery_supports_lemonade_muse_models(self):
         self.client.models.return_value = [{'providerID': 'lemonade', 'id': 'Muse-Glimmer-30B-GGUF',

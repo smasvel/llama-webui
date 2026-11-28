@@ -79,8 +79,13 @@ def _to_wav(audio_bytes: bytes) -> bytes:
         return dst.read()
 
 
-def transcribe(audio_bytes: bytes, filename: str | None = None) -> str:
-    """Transcribe recorded microphone audio to text, fully on this machine."""
+def transcribe(audio_bytes: bytes, filename: str | None = None,
+               language: str | None = None) -> str:
+    """Transcribe recorded microphone audio to text, fully on this machine.
+
+    `language` is optional: mixed-language speakers are usually better served by
+    Whisper's auto-detection, so only pass it when an administrator configured one.
+    """
     if not audio_bytes:
         raise VoiceError("Empty audio recording.")
     wav = _to_wav(audio_bytes)
@@ -88,7 +93,11 @@ def transcribe(audio_bytes: bytes, filename: str | None = None) -> str:
         handle.write(wav)
         handle.flush()
         try:
-            segments, _info = _get_model().transcribe(handle.name, beam_size=5, vad_filter=True)
+            options = {"beam_size": 5, "vad_filter": True,
+                       "condition_on_previous_text": False}
+            if language:
+                options["language"] = language
+            segments, _info = _get_model().transcribe(handle.name, **options)
             text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
         except Exception as exc:
             raise VoiceError(f"Local transcription failed: {exc}") from exc

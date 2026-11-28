@@ -64,7 +64,7 @@ class TailscaleHelpTests(unittest.TestCase):
         entry = cfg["provider"]["llamacpp"]["models"]["arbitrary-large-context-model"]
         self.assertEqual(entry["limit"]["context"], 32768)
         self.assertEqual(cfg["compaction"], {
-            "auto": True, "keep": {"tokens": 29526}, "buffer": 2730})
+            "auto": True, "keep": {"tokens": 29526}, "buffer": "8.33%"})
 
     @patch.object(help_data.settings_store, "get", return_value=None)
     def test_compaction_budget_uses_selected_model_loaded_context(self, _get):
@@ -77,7 +77,30 @@ class TailscaleHelpTests(unittest.TestCase):
                           ("llamacpp", "tiny-model"): 2048}))
         self.assertEqual(cfg["model"], "llamacpp/large-model")
         self.assertEqual(cfg["compaction"], {
-            "auto": True, "keep": {"tokens": 59051}, "buffer": 5461})
+            "auto": True, "keep": {"tokens": 59051}, "buffer": "8.33%"})
+
+    @patch.object(help_data, "_opencode_inventory", return_value=[{
+        "id": "opencode/hy4-flash-free", "name": "Hy4 flash Free",
+        "max_context_length": 1048576, "output_tokens_limit": 65536}])
+    @patch.object(help_data.settings_store, "get", return_value=None)
+    def test_compaction_scales_to_a_larger_hosted_model_window(self, _get, _inventory):
+        cfg = json.loads(help_data.build_opencode_config(
+            "203.0.113.10", "test-key", help_data._DEFAULT_PORTS,
+            {"llamacpp": ["local-65k"]}, {},
+            ctx_by_model={("llamacpp", "local-65k"): 65536}))
+        hosted = cfg["provider"]["opencode"]["models"]["hy4-flash-free"]["limit"]
+        self.assertEqual(hosted, {"context": 1048576, "output": 65536})
+        # Retained history is sized from the online model's max window, not the
+        # local 65K default, but stops at half the window to leave room for new work.
+        self.assertEqual(cfg["compaction"]["keep"]["tokens"], hosted["context"] // 2)
+        buffer = cfg["compaction"]["buffer"]
+        # A quarter of the online window is reserved so the compaction summary
+        # request fits: a smaller share left no room to summarize ~958K tokens.
+        self.assertEqual(buffer, "25%")
+        reserved = hosted["context"] * float(buffer.rstrip("%")) / 100
+        self.assertEqual(reserved, hosted["context"] // 4)
+        self.assertLess(hosted["context"] - reserved,
+                        hosted["context"] - hosted["output"])
 
     @patch.object(help_data.settings_store, "get", return_value=None)
     def test_small_lemonade_window_bounds_compaction_without_flm(self, _get):
@@ -90,7 +113,7 @@ class TailscaleHelpTests(unittest.TestCase):
                 self.assertEqual(cfg['provider']['llamacpp']['models'][model]['limit'],
                                  {'context': 4096, 'output': 2048})
                 self.assertEqual(cfg['compaction'],
-                                 {'auto': True, 'keep': {'tokens': 3691}, 'buffer': 341})
+                                 {'auto': True, 'keep': {'tokens': 3691}, 'buffer': '8.33%'})
 
     @patch.object(help_data.settings_store, "get", side_effect=lambda key:
                   '32768' if key == 'opencode_compaction_buffer' else None)
@@ -100,7 +123,7 @@ class TailscaleHelpTests(unittest.TestCase):
             {'llamacpp': ['Muse', 'small']}, {},
             ctx_by_model={('llamacpp', 'Muse'): 65536, ('llamacpp', 'small'): 4096}))
         self.assertEqual(cfg['compaction'],
-                         {'auto': True, 'keep': {'tokens': 59051}, 'buffer': 16384})
+                         {'auto': True, 'keep': {'tokens': 59051}, 'buffer': '25%'})
 
     def test_continue_uses_saved_context_over_backend_default(self):
         result = help_data.build_continue_yaml(
@@ -226,6 +249,22 @@ class GeneratedOpenCodeConfigTests(unittest.TestCase):
         text = help_data.build_opencode_jsonc("remote.example", 18474, "key", "Tailscale")
         self.assertIn("remote.example", text)
         self.assertIn("Tailscale", text)
+
+    @patch.object(help_data.settings_store, "get", return_value=None)
+    @patch.object(help_data, "_all_models", return_value=[
+        {"id": "llamacpp/qwen.gguf", "backend": "llamacpp", "type": "llm",
+         "state": "loaded", "loaded_context_length": 65536},
+        {"id": "opencode/hy4-flash-free", "backend": "opencode", "type": "llm",
+         "max_context_length": 1048576, "output_tokens_limit": 65536},
+    ])
+    def test_generated_config_uses_online_compaction_budgets(self, _models, _settings):
+        text = help_data.build_opencode_jsonc("192.0.2.10", 18474, "test-key")
+        config = json.loads(help_data.strip_jsonc(text))
+        self.assertEqual(config["compaction"], {
+            "auto": True, "keep": {"tokens": 524288}, "buffer": "25%"})
+        self.assertEqual(
+            config["provider"]["llama-web"]["models"]["hy4-flash-free"]["limit"]["context"],
+            1048576)
 
 
 if __name__ == "__main__":

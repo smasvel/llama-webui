@@ -1,4 +1,5 @@
 """The dedicated voice call must use llama.cpp + local STT/TTS only."""
+import json
 import io
 import time
 import unittest
@@ -75,7 +76,7 @@ class LlamaVoiceTests(unittest.TestCase):
         names = [tool["function"]["name"] for tool in seen.get("tools") or []]
         self.assertIn("python_repl__execute_python", names)
 
-    def test_ask_always_offers_browser_tools_when_web_is_enabled(self):
+    def test_ask_does_not_offer_browser_tools_for_casual_speech(self):
         seen = {}
 
         def stream(messages, model, **kwargs):
@@ -83,14 +84,9 @@ class LlamaVoiceTests(unittest.TestCase):
             yield 'data: {"choices": [{"delta": {"content": "[emotion: neutral] Hello."}}]}\n\n'
             yield 'data: [DONE]\n\n'
 
-        original_mode = app.mcp_tools_client.chat_tool_mode
-        with patch.object(app.mcp_tools_client, "chat_tool_mode",
-                          side_effect=lambda text, **kw: None if text == "hello there"
-                          else original_mode(text, **kw)), \
-             patch.object(app.mcp_tools_client, "ensure_started", return_value=[
-                 {"function": {"name": "playwright__browser_snapshot"}},
-                 {"function": {"name": "python_repl__execute_python"}},
-             ]), \
+        with patch.object(app.mcp_tools_client, "chat_tool_mode", return_value=None), \
+             patch.object(app.mcp_tools_client, "ensure_started", side_effect=AssertionError(
+                 "MCP tools must not start for a spoken greeting")), \
              patch.object(app.zen, "chat_stream", side_effect=stream):
             response = self.client.post(
                 "/api/voice/ask",
@@ -98,9 +94,225 @@ class LlamaVoiceTests(unittest.TestCase):
                 headers=self.headers)
             response.get_data()
         self.assertEqual(response.status_code, 200)
+        self.assertFalse(seen.get("tools"))
+
+    def test_voice_prompt_asks_for_an_internal_tool_decision(self):
+        seen = {}
+
+        def stream(messages, model, **kwargs):
+            seen["system"] = messages[0]["content"]
+            yield 'data: {"choices": [{"delta": {"content": "[emotion: neutral] Hi."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        with patch.object(app.web_search, "should_search_web", return_value=True), \
+             patch.object(app, "_web_search_context", return_value=("", [])), \
+             patch.object(app.mcp_tools_client, "ensure_started", return_value=[
+                 {"function": {"name": "playwright__browser_navigate"}}]), \
+             patch.object(app.zen, "chat_stream", side_effect=stream):
+            self.client.post(
+                "/api/voice/ask",
+                json={"message": "what is the weather in Durham",
+                      "model": "opencode/hy4-flash-free"},
+                headers=self.headers).get_data()
+        self.assertIn("Before any tool call", seen["system"])
+        self.assertIn("decide internally", seen["system"])
+
+    def test_ask_offers_browser_tools_for_a_live_lookup_without_explicit_mode(self):
+        seen = {}
+
+        def stream(messages, model, **kwargs):
+            seen["tools"] = kwargs.get("tools")
+            yield 'data: {"choices": [{"delta": {"content": "[emotion: neutral] Sunny."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        original_mode = app.mcp_tools_client.chat_tool_mode
+        with patch.object(app.web_search, "should_search_web", return_value=True), \
+             patch.object(app, "_web_search_context", return_value=("some live hint", [])), \
+             patch.object(app.mcp_tools_client, "chat_tool_mode",
+                          side_effect=lambda text, **kw: None if text == "check the weather in Durham nc"
+                          else original_mode(text, **kw)), \
+             patch.object(app.mcp_tools_client, "ensure_started", return_value=[
+                 {"function": {"name": "playwright__browser_navigate"}}]), \
+             patch.object(app.zen, "chat_stream", side_effect=stream):
+            self.client.post(
+                "/api/voice/ask",
+                json={"message": "check the weather in Durham nc",
+                      "model": "opencode/hy4-flash-free"},
+                headers=self.headers).get_data()
         names = [tool["function"]["name"] for tool in seen.get("tools") or []]
-        self.assertIn("playwright__browser_snapshot", names)
-        self.assertNotIn("python_repl__execute_python", names)
+        self.assertIn("playwright__browser_navigate", names)
+
+    def test_factual_question_gets_browser_tools_without_a_search_keyword(self):
+        seen = {}
+
+        def stream(messages, model, **kwargs):
+            seen["tools"] = kwargs.get("tools")
+            yield 'data: {"choices": [{"delta": {"content": "[emotion: neutral] Paris."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        with patch.object(app.mcp_tools_client, "ensure_started", return_value=[
+                 {"function": {"name": "playwright__browser_navigate"}}]), \
+             patch.object(app.zen, "chat_stream", side_effect=stream):
+            self.client.post(
+                "/api/voice/ask",
+                json={"message": "What is the capital of France?",
+                      "model": "opencode/hy4-flash-free"},
+                headers=self.headers).get_data()
+        names = [tool["function"]["name"] for tool in seen.get("tools") or []]
+        self.assertIn("playwright__browser_navigate", names)
+
+    def test_refusal_escalates_to_browser_tools_when_none_were_offered(self):
+        seen = []
+
+        def first(messages, model, **kwargs):
+            seen.append(kwargs.get("tools"))
+            yield ('data: {"choices": [{"delta": {"content": '
+                   '"[emotion: neutral] I don\'t know that one."}}]}\n\n')
+            yield 'data: [DONE]\n\n'
+
+        def second(messages, model, **kwargs):
+            seen.append(kwargs.get("tools"))
+            yield ('data: {"choices": [{"delta": {"content": '
+                   '"[emotion: neutral] It is Paris."}}]}\n\n')
+            yield 'data: [DONE]\n\n'
+
+        streams = [first, second]
+
+        def fake_chat(messages, model, **kwargs):
+            return streams.pop(0)(messages, model, **kwargs)
+
+        original_mode = app.mcp_tools_client.chat_tool_mode
+        with patch.object(app, "_voice_needs_lookup", return_value=False), \
+             patch.object(app.mcp_tools_client, "chat_tool_mode",
+                          side_effect=lambda text, **kw: None if text == "What is the capital of France?"
+                          else original_mode(text, **kw)), \
+             patch.object(app.mcp_tools_client, "ensure_started", return_value=[
+                 {"function": {"name": "playwright__browser_navigate"}}]), \
+             patch.object(app.zen, "chat_stream", side_effect=fake_chat):
+            response = self.client.post(
+                "/api/voice/ask",
+                json={"message": "What is the capital of France?",
+                      "model": "opencode/hy4-flash-free"},
+                headers=self.headers)
+        self.assertIn(b"It is Paris.", response.data)
+        self.assertFalse(seen[0])
+        self.assertTrue(any((tool or {}).get("function", {}).get("name") ==
+                            "playwright__browser_navigate" for tool in seen[1] or []))
+
+    def test_tool_only_stream_still_produces_a_spoken_answer(self):
+        def tool_stream(messages, model, **kwargs):
+            yield ('data: {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", '
+                   '"type": "function", "function": {"name": "playwright__browser_navigate", '
+                   '"arguments": "{}"}}]}, "finish_reason": "tool_calls"}]}\n\n')
+            yield 'data: [DONE]\n\n'
+
+        with patch.object(app.web_search, "should_search_web", return_value=True), \
+             patch.object(app, "_web_search_context", return_value=("", [])), \
+             patch.object(app.mcp_tools_client, "ensure_started", return_value=[
+                 {"function": {"name": "playwright__browser_navigate"}}]), \
+             patch.object(app.mcp_tools_client, "call_tool",
+                          return_value="India won the final by 50 runs."), \
+             patch.object(app.zen, "chat_stream", side_effect=tool_stream):
+            response = self.client.post(
+                "/api/voice/ask",
+                json={"message": "who won the latest cricket world cup?",
+                      "model": "opencode/hy4-flash-free"},
+                headers=self.headers)
+        self.assertIn(b"India won the final by 50 runs.", response.data)
+
+    def test_weak_answer_detector_catches_leaked_planning_text(self):
+        self.assertTrue(app._voice_is_weak_answer(
+            "Need answer naturally out loud. Need parse user: the weather question."))
+        self.assertTrue(app._voice_is_weak_answer(
+            "Sorry, I couldn't verify the live results."))
+        self.assertFalse(app._voice_is_weak_answer(
+            "[emotion: neutral] It's sunny, 51F in Durham."))
+
+    def test_ask_logs_thinking_and_answer_outcome(self):
+        def stream(messages, model, **kwargs):
+            yield 'data: {"choices": [{"delta": {"content": "[emotion: happy]Logged reply."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        with patch.object(app.llamacpp, "chat_stream", side_effect=stream), \
+             self.assertLogs("app", level="INFO") as logs:
+            self.client.post("/api/voice/ask", json={"message": "hello"},
+                             headers=self.headers).get_data()
+        self.assertTrue(any("VOICE_ASK" in line and "outcome=ok" in line
+                            and "first_token_ms=" in line for line in logs.output))
+
+    def test_voice_log_endpoint_records_spoken_vs_leftover(self):
+        with self.assertLogs("app", level="INFO") as logs:
+            response = self.client.post("/api/voice/log", json={
+                "event": "coverage", "conversation_id": "conv-1",
+                "model": "opencode/hy4-flash-free", "answer_chars": 100,
+                "spoken_chars": 40, "left_chars": 60, "elapsed_ms": 4200,
+                "preview": "the remaining sentence"}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(any("VOICE_CLIENT" in line and "event=coverage" in line
+                            and "left_chars=60" in line for line in logs.output))
+
+    def test_ask_never_speaks_a_reasoning_only_stream(self):
+        def stream(messages, model, **kwargs):
+            yield 'data: {"choices": [{"delta": {"reasoning_content": "Just say hello back."}}]}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        with patch.object(app.zen, "chat_stream", side_effect=stream):
+            response = self.client.post(
+                "/api/voice/ask",
+                json={"message": "hello", "model": "opencode/hy4-flash-free"},
+                headers=self.headers)
+        self.assertNotIn(b"Just say hello back.", response.data)
+        self.assertIn(b"couldn't summarize it out loud", response.data)
+
+    def test_ask_strips_thinking_tags_and_caps_long_replies(self):
+        def stream(messages, model, **kwargs):
+            yield ('data: {"choices": [{"delta": {"content": '
+                   '"<think>private thoughts</think>A short spoken answer."}}]}\n\n')
+            yield 'data: [DONE]\n\n'
+
+        with patch.object(app.llamacpp, "chat_stream", side_effect=stream):
+            response = self.client.post("/api/voice/ask", json={"message": "hello"},
+                                        headers=self.headers)
+        self.assertNotIn(b"private thoughts", response.data)
+        self.assertIn(b"A short spoken answer.", response.data)
+
+    def test_ask_summarizes_after_live_check_without_tool_round_text(self):
+        calls = []
+
+        def first(messages, model, **kwargs):
+            yield ('data: {"choices": [{"delta": {"content": '
+                   '"<think>Let me check the web.</think>I will look that up now."}}]}\n\n')
+            yield ('data: {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", '
+                   '"type": "function", "function": {"name": "playwright__browser_navigate", '
+                   '"arguments": "{}"}}]}, "finish_reason": "tool_calls"}]}\n\n')
+            yield 'data: [DONE]\n\n'
+
+        def second(messages, model, **kwargs):
+            yield ('data: {"choices": [{"delta": {"content": '
+                   '"The page says it is sunny."}}]}\n\n')
+            yield 'data: [DONE]\n\n'
+
+        streams = [first, second]
+
+        def fake_chat(messages, model, **kwargs):
+            calls.append(messages)
+            return streams.pop(0)(messages, model, **kwargs)
+
+        with patch.object(app.zen, "chat_stream", side_effect=fake_chat), \
+             patch.object(app.mcp_tools_client, "chat_tool_mode", return_value="browser"), \
+             patch.object(app.mcp_tools_client, "ensure_started", return_value=[
+                 {"function": {"name": "playwright__browser_navigate"}}]), \
+             patch.object(app.mcp_tools_client, "call_tool", return_value="x" * 5000):
+            response = self.client.post(
+                "/api/voice/ask",
+                json={"message": "check the weather", "model": "opencode/hy4-flash-free"},
+                headers=self.headers)
+        data = response.get_data(as_text=True)
+        self.assertNotIn("Let me check the web", data)
+        self.assertNotIn("I will look that up now", data)
+        self.assertIn("The page says it is sunny.", data)
+        self.assertIn("The live data check is complete", json.dumps(calls[1]))
+        self.assertIn("omitted to fit model context", json.dumps(calls[1]))
 
     def test_ask_persists_both_turns_in_the_chat_conversation(self):
         from llama_web.storage import chat_store

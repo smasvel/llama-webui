@@ -57,6 +57,19 @@ def compaction_for_window(window: int) -> dict:
     return {"keep": keep, "buffer": buffer}
 
 
+def buffer_percentage(buffer: int, window: int) -> str:
+    """OpenCode interprets `compaction.buffer` against *each* model's own window.
+
+    A token count produced from one model's window becomes a tiny fraction of a
+    hosted model's much larger window, so auto-compaction fires past that model's
+    usable input limit and the provider rejects the request before compaction can
+    start. Emitting the same headroom as a percentage scales it to whichever model
+    the session uses, which is what OpenCode's config format is designed for.
+    """
+    percent = 100 * max(0, buffer) / max(1, window)
+    return f"{percent:.2f}".rstrip('0').rstrip('.') + '%'
+
+
 def configured_compaction_for_window(window: int, keep_override: int | None = None,
                                      buffer_override: int | None = None) -> dict:
     """Apply optional admin overrides to formula-derived budgets for one context window.
@@ -93,6 +106,39 @@ def compaction_settings() -> dict:
     auto = (settings_store.get("opencode_compaction_auto") or "true") == "true"
     return {"auto": auto, "keep_tokens": max(0, keep) if keep is not None else None,
             "buffer": buffer}
+
+
+def generated_compaction(windows: list[int], default_window: int | None = None,
+                         online_windows: list[int] | None = None) -> dict:
+    """Compaction block shared by both generated OpenCode configs.
+
+    Compaction is global, so a single keep/buffer pair has to serve every model in
+    the config. Hosted models advertise much larger windows than local GGUFs: size
+    retained history from the largest online window (capped at half so a summary
+    still leaves room for new work) and emit the buffer as a percentage so OpenCode
+    scales it to whichever model the session actually uses.
+    """
+    settings = compaction_settings()
+    block: dict = {"auto": settings["auto"]}
+    if not windows:
+        return block
+    online_max = max(online_windows) if online_windows else 0
+    limit = online_max or default_window or min(windows)
+    buffer_override = settings['buffer']
+    if online_max:
+        # A compaction summary request sends the conversation it is replacing.
+        # On a ~1M window an 8% buffer leaves no room for that request, so the
+        # summary fails with the same input-limit error as an ordinary step.
+        # Reserve a quarter of the largest online window so compaction fires
+        # while the conversation is still small enough to summarize.
+        buffer_override = online_max // 4
+    budgets = configured_compaction_for_window(
+        limit, keep_override=settings['keep_tokens'], buffer_override=buffer_override)
+    if online_max:
+        budgets['keep'] = min(budgets['keep'], online_max // 2)
+    block['keep'] = {'tokens': budgets['keep']}
+    block['buffer'] = buffer_percentage(budgets['buffer'], limit)
+    return block
 
 
 def opencode_context_settings() -> dict:
@@ -502,33 +548,24 @@ def build_opencode_config(ip, token, ports, chat_by_be, loaded_by_be, default_ov
                 },
                 "models": console_models,
             }
-    # Bound the administrator's compaction settings to the configured model windows
-    # below; OpenCode's default retained history can exceed an entire small window.
-    compaction = compaction_settings()
-    compaction_block: dict = {"auto": compaction["auto"]}
-    cfg = {
-        "$schema": "https://opencode.ai/config.json",
-        "model": _pick_default(chat_by_be, loaded_by_be, default_override) or "",
-        "provider": provider,
-        "compaction": compaction_block,
-    }
-    # Compaction is global for every backend.
+    # Compaction is global for every backend. Bound its budgets to the configured
+    # windows so OpenCode's default retained history can't exceed a small window,
+    # and size the retained tail from hosted models when they are present.
     windows = [item['limit']['context'] for p in provider.values()
                for item in p['models'].values()]
-    if windows:
-        default_model = _pick_default(chat_by_be, loaded_by_be, default_override) or ""
-        be_, model_id = default_model.partition("/")[0], default_model.partition("/")[2]
-        default_window = None
-        if be_ in provider and model_id in provider.get(be_, {}).get('models', {}):
-            default_window = provider[be_]['models'][model_id]['limit']['context']
-        limit = default_window or min(windows)
-        # keep/buffer are derived from the selected model's window: keep + buffer +
-        # the compaction prompt must fit, so keep never equals the window.
-        budgets = configured_compaction_for_window(
-            limit, keep_override=compaction['keep_tokens'],
-            buffer_override=compaction['buffer'])
-        compaction_block['keep'] = {'tokens': budgets['keep']}
-        compaction_block['buffer'] = budgets['buffer']
+    default_model = _pick_default(chat_by_be, loaded_by_be, default_override) or ""
+    be_, model_id = default_model.partition("/")[0], default_model.partition("/")[2]
+    default_window = None
+    if be_ in provider and model_id in provider.get(be_, {}).get('models', {}):
+        default_window = provider[be_]['models'][model_id]['limit']['context']
+    online_windows = [item['limit']['context'] for item in
+                      provider.get('opencode', {}).get('models', {}).values()]
+    cfg = {
+        "$schema": "https://opencode.ai/config.json",
+        "model": default_model,
+        "provider": provider,
+        "compaction": generated_compaction(windows, default_window, online_windows),
+    }
     return json.dumps(cfg, indent=2)
 
 
@@ -555,6 +592,8 @@ def build_opencode_jsonc(host: str, app_port: int, api_key: str,
                            "id": item.get("id") or "", "name": item.get("name") or item.get("id")})
     chat = [m for m in models if m.get("type") not in _NON_CHAT]
     entries = {}
+    windows: list[int] = []
+    online_windows: list[int] = []
     for m in chat:
         backend = m.get("backend") or "llamacpp"
         model_id = m["id"]
@@ -570,6 +609,10 @@ def build_opencode_jsonc(host: str, app_port: int, api_key: str,
             "limit": {"context": context,
                       "output": _advertised_output(backend, context, model_id)},
         }
+        if isinstance(context, int) and context > 0:
+            windows.append(context)
+            if backend == "opencode":
+                online_windows.append(context)
     config = {
         "$schema": "https://opencode.ai/config.json",
         "provider": {
@@ -584,6 +627,9 @@ def build_opencode_jsonc(host: str, app_port: int, api_key: str,
                 "models": entries,
             }
         },
+        # Keep the Help-panel config in step with the online-aware budgets used by
+        # the other generated config (and by agent containers via opencode_config_object).
+        "compaction": generated_compaction(windows, online_windows=online_windows),
     }
     header = (
         "// Generated by llama-web for the " + network_label + " network.\n"

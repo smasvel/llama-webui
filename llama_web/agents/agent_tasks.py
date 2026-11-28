@@ -95,6 +95,10 @@ def is_context_overflow(error):
         'context_length_exceeded', 'exceed_context_size_error',
         'exceeds the available context', 'context window exceeded',
         'prompt is too long', 'maximum context length',
+        # Some upstream providers reject the whole request instead of emitting
+        # OpenCode's own `provider.error` wording. Detect their signature so the
+        # job reaches the same fresh-session recovery as a local context overflow.
+        'input tokens exceed the model context limit', '[400003]',
     ))
 
 

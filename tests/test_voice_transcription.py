@@ -37,7 +37,21 @@ class VoiceTranscriptionRouteTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["text"], "hello llama_web")
-        whisper.assert_called_once_with(b"sample audio", filename="recording.webm")
+        whisper.assert_called_once_with(b"sample audio", filename="recording.webm",
+                                        language=None)
+
+    def test_stt_language_can_be_configured_by_environment(self):
+        from llama_web.voice import stt as local_stt
+        with patch.dict("os.environ", {"LLAMA_WEB_STT_LANGUAGE": "hi"}), \
+             patch.object(local_stt, "transcribe", return_value="नमस्ते") as whisper:
+            response = self.client.post(
+                "/api/voice/transcribe",
+                data={"audio": (io.BytesIO(b"sample audio"), "recording.webm"),
+                      "language": ""},
+                headers={"X-CSRF-Token": "voice-test-csrf"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(whisper.call_args.kwargs.get("language"), "hi")
 
     def test_transcription_errors_return_actionable_backend_error(self):
         from llama_web.voice import stt as local_stt

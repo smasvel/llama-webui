@@ -4,6 +4,7 @@ import functools
 import html
 import inspect
 import json
+import logging
 import os
 import queue
 import subprocess
@@ -151,6 +152,8 @@ VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 APP_PORT = int(os.environ.get("PORT", "5443"))
 
 app = Flask(__name__)
+# Voice diagnostics use INFO; Flask's default WARNING level hides them.
+app.logger.setLevel(logging.INFO)
 _legacy_session_key = os.environ.get("FLASK_SECRET_KEY")
 app.secret_key = secret_store.get_or_create_flask_key(_legacy_session_key)
 os.environ.pop("FLASK_SECRET_KEY", None)
@@ -4578,6 +4581,10 @@ def api_load_model():
             return jsonify({"error": str(exc)}), 502
         return jsonify({"ok": True, "unloaded": [], "externally_managed": True})
     if llamacpp.owns_model(model_key):
+        entry = next((m for m in llamacpp.list_models() if m.get("id") == model_key), None)
+        if entry and entry.get("loadable") is False:
+            return jsonify({"error": entry.get("management_hint")
+                            or "This model is missing files and cannot be loaded."}), 422
         # The engine has no runtime load API: llama-web rewrites LLAMA_MODEL in
         # server.conf and restarts llama-web-engine.service, so keep the shared
         # eviction and memory checks around that handoff.
@@ -6211,52 +6218,118 @@ def api_voice_transcribe():
     if not audio_bytes:
         return jsonify({"error": "empty audio"}), 400
     from llama_web.voice import stt as local_stt
+    language = (request.form.get("language")
+                or os.environ.get("LLAMA_WEB_STT_LANGUAGE", "")).strip() or None
     try:
         text = local_stt.transcribe(
-            audio_bytes, filename=audio_file.filename or "recording.webm"
+            audio_bytes, filename=audio_file.filename or "recording.webm",
+            language=language,
         )
     except local_stt.VoiceError as exc:
         return jsonify({"error": str(exc)}), 502
+    app.logger.info("VOICE_STT bytes=%d lang=%s text_chars=%d preview=%r",
+                    len(audio_bytes), language or "auto", len(text), text[:120])
     return jsonify({"text": text})
+
+
+def _voice_browser_tools() -> list[dict]:
+    """Browser read tools for a spoken turn, used directly and on refusal escalation."""
+    try:
+        available = mcp_tools_client.ensure_started()
+        return mcp_tools_client.select_chat_tools(
+            [tool for tool in available
+             if (tool.get("function") or {}).get("name", "").startswith("playwright__")],
+            "browse the web", web_evidence_ready=False,
+        )
+    except Exception:
+        return []
+
+
+def _voice_needs_lookup(message: str) -> bool:
+    """Broad question detection so factual questions get a tool instead of a guess."""
+    if web_search.should_search_web(message):
+        return True
+    social, remainder = web_search._is_social_query(message)
+    if social and not remainder:
+        return False
+    return bool(re.search(
+        r"\?|^\s*(?:what|who|when|where|why|how|which|tell me|find|check|explain|"
+        r"compare|list|name|price|cost|score|result)\b", message, re.I))
 
 
 def _voice_tool_context(message: str) -> tuple[list[str], list[dict]]:
     """Same search/MCP tool selection the typed chat uses, for spoken turns."""
     notes = []
     web_enabled = (settings_store.get("web_search_enabled") or "true") == "true"
-    if web_enabled and web_search.should_search_web(message):
+    needs_live = web_enabled and _voice_needs_lookup(message)
+    if needs_live:
         try:
             note, _ = _web_search_context(message)
             if note:
-                notes.append("[Live evidence retrieved by llama_web]\n" + note[:2400]
+                notes.append("[Live evidence retrieved by llama_web — verify with a "
+                             "browser tool when one is available]\n" + note[:1200]
                              + "\n[End of live evidence.]")
         except Exception:
             pass
     tools = []
     try:
         mode = mcp_tools_client.chat_tool_mode(message) or ""
-        # Playwright's read tools are always offered when web access is on.
-        if web_enabled:
+        # Ordinary speech gets no tools (a forced Playwright round used to stall
+        # the call). Factual questions and live lookups get browser tools even
+        # when the intent parser reports no explicit mode.
+        if needs_live:
             mode = "+".join(filter(None, (mode, "browser"))) if mode else "browser"
-        available = mcp_tools_client.ensure_started()
-        prefixes = tuple(
-            prefix for prefix, wanted in (
-                ("playwright__", "browser" in mode),
-                ("python_repl__", "python" in mode),
-            ) if wanted
-        )
-        tools = mcp_tools_client.select_chat_tools(
-            [tool for tool in available
-             if (tool.get("function") or {}).get("name", "").startswith(prefixes)],
-            message if mcp_tools_client.chat_tool_mode(message) else "browse the web",
-            web_evidence_ready=False,
-        )
+        if not mode:
+            return notes, []
+        if "browser" in mode:
+            tools.extend(_voice_browser_tools())
+        if "python" in mode:
+            available = mcp_tools_client.ensure_started()
+            tools.extend(mcp_tools_client.select_chat_tools(
+                [tool for tool in available
+                 if (tool.get("function") or {}).get("name", "").startswith("python_repl__")],
+                message, web_evidence_ready=False,
+            ))
     except Exception:
         tools = []
     if tools:
         notes.append("MCP tools are available for this turn. Use them for live browser "
                      "checks or local Python work; read each result before answering.")
     return notes, tools
+
+
+_VOICE_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.I | re.S)
+_VOICE_THINK_TAG_RE = re.compile(r"</?think\s*>", re.I)
+_VOICE_TOOL_MARKER_RE = re.compile(r"🔧\s*\*Calling[^*]*\*")
+
+
+_VOICE_WEAK_RE = re.compile(
+    r"couldn.t (?:verify|get|find|check|access)|could not verify|results were unrelated|"
+    r"don.t have (?:live|internet|access)|can.t (?:access|check|verify)|not able to|"
+    r"i don.t know|no reliable", re.I)
+_VOICE_THINKING_TEXT_RE = re.compile(
+    r"^\s*(?:need answer|need parse|let me think|(?:i|we) need to|"
+    r"the user (?:asked|is asking)|parse user|i should)\b", re.I)
+
+
+def _voice_is_weak_answer(text: str) -> bool:
+    """A refusal or leaked planning text is worth one more turn with the tool results."""
+    value = (text or "").strip()
+    return (not value or bool(_VOICE_WEAK_RE.search(value))
+            or bool(_VOICE_THINKING_TEXT_RE.match(value)))
+
+
+def _voice_visible_text(text: str, limit: int = 700) -> str:
+    """Spoken/chat-visible reply only: no thinking blocks or tool activity markers."""
+    text = _VOICE_THINK_BLOCK_RE.sub("", text or "")
+    text = _VOICE_THINK_TAG_RE.sub("", text)
+    text = _VOICE_TOOL_MARKER_RE.sub("", text)
+    text = " ".join(text.split())
+    if len(text) > limit:
+        head = text[:limit]
+        boundary = max(head.rfind(". "), head.rfind("! "), head.rfind("? "))
+        text = (head[:boundary + 1] if boundary > limit // 2 else head.rstrip()) + "…"
+    return text.strip()
 
 
 @app.post("/api/voice/ask")
@@ -6280,39 +6353,73 @@ def api_voice_ask():
     # so they appear in the chat transcript like typed messages.
     if conversation_id and user_id:
         try:
-            if chat_store.get_conversation(conversation_id, user_id) is None:
+            conv = chat_store.get_conversation(conversation_id, user_id)
+            if conv is None:
                 chat_store.ensure_conversation(conversation_id, user_id, model or None, message)
-            chat_store.add_message(conversation_id, "user", message,
-                                   model=model or None, backend=backend_name)
+                conv = chat_store.get_conversation(conversation_id, user_id)
+            # The client retries a spoken turn when it times out. Don't record the
+            # same utterance twice with no answer between the attempts.
+            recent = (conv or {}).get("messages") or []
+            last = recent[-1] if recent else {}
+            duplicate = (last.get("role") == "user"
+                         and str(last.get("content") or "").strip() == message
+                         and time.time() - float(last.get("created_at") or 0) < 120)
+            if not duplicate:
+                chat_store.add_message(conversation_id, "user", message,
+                                       model=model or None, backend=backend_name)
         except Exception:
             conversation_id = ""  # never fail the spoken reply on a storage issue
 
+    # A long system prompt makes reasoning models spend their whole token budget
+    # thinking instead of answering, which leaves the spoken turn empty. Keep the
+    # voice instruction short and cap the live-evidence excerpt.
     system = {
         "role": "system",
-        "content": ("You are in a spoken voice call. Start every reply with an emotion tag "
-                    "like [emotion: happy], [emotion: thoughtful], [emotion: surprised], "
-                    "[emotion: concerned] or [emotion: neutral], then answer naturally and "
-                    "completely out loud. Use the conversation context, acknowledge what the "
-                    "user just said, and ask a brief follow-up question when it keeps the "
-                    "conversation moving. Sound like a thoughtful human assistant, not a "
-                    "list: plain spoken sentences, no markdown, no bullet points, no code."),
+        "content": ("You are in a spoken voice call. Answer in one or two short, natural "
+                    "sentences. Start with an emotion tag like [emotion: neutral]. Do not "
+                    "think out loud, do not show reasoning, no markdown, no lists. Be brief "
+                    "so the reply can be spoken."),
     }
     notes, tools = _voice_tool_context(message)
-    if notes:
-        system["content"] += "\n\n" + "\n\n".join(notes)
+    # The tool instruction must live in the core prompt: it used to be part of the
+    # notes block, which the 600-char evidence cap truncated away, so the model
+    # never knew it could call a browser tool.
+    if tools:
+        system["content"] += ("\n\nBefore any tool call, decide internally which route fits: "
+                              "answer from knowledge or the supplied live evidence when that "
+                              "covers the question; use the browser tool only when the fact is "
+                              "current, uncertain, or missing from that evidence. Make this "
+                              "decision silently and speak only the verified answer.")
+    evidence = "\n\n".join(n for n in notes
+                           if not n.startswith("MCP tools are available"))[:600]
+    if evidence:
+        system["content"] += "\n\nLive evidence (verify with a tool):\n" + evidence
     messages = [system] + [m for m in history if isinstance(m, dict)
                            and m.get("role") in ("user", "assistant")][-8:]
     messages.append({"role": "user", "content": message})
 
     def generate():
+        nonlocal tools
         answer_parts = []
+        reasoning_parts = []
+        started = time.monotonic()
+        first_token_at = None
+        tool_calls = 0
+        outcome = "ok"
+        error_text = ""
+        reasoning_fallback = False
+        answer_only = False
+        last_tool_text = ""
         try:
             for _round in range(4):
                 round_parts = []
-                round_answer_start = len(answer_parts)
                 round_calls: dict[int, dict] = {}
-                extra = {"temperature": 0.7, "max_tokens": 768}
-                if tools:
+                # Hosted reasoning models can spend hundreds of tokens thinking
+                # before any answer text; a 768-token budget ends the stream first.
+                extra = {"temperature": 0.7, "max_tokens": 2048}
+                # After the first live-check round, remove tools so the model has
+                # to answer instead of spending every remaining round on calls.
+                if tools and not answer_only:
                     extra["tools"] = tools
                     extra["parallel_tool_calls"] = True
                 if model.startswith("opencode/"):
@@ -6343,38 +6450,82 @@ def api_voice_ask():
                             entry["function"]["name"] += fn["name"]
                         if fn.get("arguments"):
                             entry["function"]["arguments"] += fn["arguments"]
+                    reasoning = chat_jobs.reasoning_from_delta(delta)
+                    if reasoning:
+                        reasoning_parts.append(reasoning)
+                    # Buffer every round. Nothing reaches the call or the saved chat
+                    # transcript until we know the round is the final answer, so
+                    # thinking and tool-round planning text never leak through.
                     content = delta.get("content") or ""
-                    if content and not round_calls:
+                    if content:
+                        if first_token_at is None:
+                            first_token_at = time.monotonic()
                         round_parts.append(content)
-                        answer_parts.append(content)
-                        if not tools:
-                            # Ordinary conversation: speak as soon as text arrives.
-                            yield "data: " + json.dumps({"choices": [{"delta": {"content": content}}]}) + "\n\n"
-                if not round_calls:
-                    if tools and round_parts:
-                        # Tool rounds may have emitted planning commentary; only
-                        # the final answer should be spoken, so emit it once here.
-                        yield "data: " + json.dumps(
-                            {"choices": [{"delta": {"content": "".join(round_parts)}}]}) + "\n\n"
-                    break
-                # Commentary from a round that requested tools must not be spoken.
-                del answer_parts[round_answer_start:]
-                # Execute each requested tool and feed the result back, exactly as
-                # typed chat does, then let the model answer with that evidence.
-                call_list = [round_calls[i] for i in sorted(round_calls)]
-                messages.append({"role": "assistant", "content": None, "tool_calls": call_list})
-                for call in call_list:
-                    name = call["function"]["name"]
-                    result = mcp_tools_client.call_tool(name, call["function"]["arguments"])
-                    messages.append({"role": "tool", "tool_call_id": call["id"] or f"call_{_round}",
-                                     "content": result})
+                if round_calls and not answer_only:
+                    call_list = [round_calls[i] for i in sorted(round_calls)]
+                    tool_calls += len(call_list)
+                    messages.append({"role": "assistant", "content": None, "tool_calls": call_list})
+                    for call in call_list:
+                        name = call["function"]["name"]
+                        result = mcp_tools_client.call_tool(name, call["function"]["arguments"])
+                        last_tool_text = mcp_tools_client.compact_chat_tool_result(str(result))
+                        messages.append({"role": "tool", "tool_call_id": call["id"] or f"call_{_round}",
+                                         "content": last_tool_text})
+                    answer_only = True
+                    # The live check is finished. Ask for a short spoken summary
+                    # instead of letting the model narrate the raw tool result.
+                    messages.append({"role": "system", "content": (
+                        "The live data check is complete. Do not call any more tools. Answer "
+                        "now in one or two short spoken sentences using the verified results. "
+                        "No thinking, no tool names, no markdown and no long lists.")})
+                    continue
+                answer = _voice_visible_text("".join(round_parts))
+                if _voice_is_weak_answer(answer) and _round < 3 and not answer_only:
+                    # Escalate: a question that got no tool the first time now gets
+                    # browser tools; one that had tools gets a firmer nudge to use
+                    # the results already in the transcript instead of refusing.
+                    if not tools:
+                        tools = _voice_browser_tools()
+                    if tools:
+                        messages.append({"role": "system", "content": (
+                            "Do not refuse or say you cannot verify. Use the available "
+                            "browser tools (or the results already in the conversation) "
+                            "to find the answer, then reply with the verified facts in "
+                            "one or two short spoken sentences.")})
+                        continue
+                if not answer and last_tool_text:
+                    # The model burned its rounds on tool calls. Speak a short,
+                    # sanitized excerpt of what the tool actually returned rather
+                    # than leaving the question unanswered.
+                    summary = _voice_visible_text(last_tool_text, 350)
+                    if summary:
+                        answer = "[emotion: neutral] " + summary
+                if not answer and reasoning_parts:
+                    reasoning_fallback = True
+                    answer = "I finished the check but couldn't summarize it out loud. Please ask again."
+                if answer:
+                    answer_parts.append(answer)
+                    yield "data: " + json.dumps({"choices": [{"delta": {"content": answer}}]}) + "\n\n"
+                break
             yield "data: [DONE]\n\n"
         except Exception as exc:
-            yield "data: " + json.dumps({"error": str(exc)[:300]}) + "\n\n"
+            outcome = "error"
+            error_text = str(exc)
+            app.logger.exception("Voice chat stream failed")
+            yield "data: " + json.dumps({"error": error_text[:300]}) + "\n\n"
             yield "data: [DONE]\n\n"
         finally:
             answer = "".join(answer_parts)
             answer = re.sub(r"^\s*\[emotion:\s*[^\]]+\]\s*", "", answer).strip()
+            if outcome == "ok" and not answer:
+                outcome = "empty"
+            app.logger.info(
+                "VOICE_ASK conv=%s model=%s backend=%s outcome=%s first_token_ms=%d total_ms=%d "
+                "answer_chars=%d reasoning_chars=%d tool_calls=%d reasoning_fallback=%s error=%r",
+                conversation_id or "-", model or "-", backend_name, outcome,
+                int((first_token_at - started) * 1000) if first_token_at else -1,
+                int((time.monotonic() - started) * 1000), len(answer),
+                len("".join(reasoning_parts)), tool_calls, reasoning_fallback, error_text[:160])
             if conversation_id and user_id and answer:
                 try:
                     chat_store.add_message(conversation_id, "assistant", answer,
@@ -6384,6 +6535,34 @@ def api_voice_ask():
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-store"})
+
+
+def _voice_log_int(value) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return -1
+
+
+@app.post("/api/voice/log")
+@login_required
+def api_voice_log():
+    """Client-side voice diagnostics: what was spoken, what was left over, timings."""
+    body = request.get_json(force=True, silent=True) or {}
+    event = str(body.get("event") or "")
+    if not re.fullmatch(r"[a-z_]{1,40}", event):
+        return jsonify({"error": "invalid event"}), 400
+    app.logger.info(
+        "VOICE_CLIENT conv=%s event=%s model=%s answer_chars=%d spoken_chars=%d left_chars=%d "
+        "elapsed_ms=%d preview=%r",
+        str(body.get("conversation_id") or "-")[:80], event,
+        str(body.get("model") or "-")[:80],
+        _voice_log_int(body.get("answer_chars")),
+        _voice_log_int(body.get("spoken_chars")),
+        _voice_log_int(body.get("left_chars")),
+        _voice_log_int(body.get("elapsed_ms")),
+        str(body.get("preview") or "")[:120])
+    return jsonify({"ok": True})
 
 
 @app.post("/api/voice/translate")
@@ -7053,6 +7232,10 @@ def api_chat():
         def worker():
             browse_history_store.current_owner.set(user_id)
             assistant_parts: list[str] = []
+            # Tool-call markers are streamed to the bubble as activity, but they are
+            # not model prose and must never count as an answer or be saved as one.
+            tool_status_parts: list[str] = []
+            tool_followups = 0
             source_reply = _research_source_reply(web_evidence) if explicit_search and web_evidence else None
             research_content_streaming = False
             reasoning_parts: list[str] = []
@@ -7060,6 +7243,23 @@ def api_chat():
             output_limited = False
             tool_round_limited = False
             request_status = "done"
+
+            def _ask_for_tool_answer() -> bool:
+                """Ask for a plain-text answer after tool calls instead of ending on markers."""
+                nonlocal tool_followups
+                if (cancel_event.is_set() or source_reply or tool_followups >= 2
+                        or not tool_status_parts
+                        or any(part.strip() for part in assistant_parts + reasoning_parts)):
+                    return False
+                tool_followups += 1
+                loop_messages.append({
+                    "role": "system",
+                    "content": ("You already ran the requested tools. Do not call more tools. "
+                                "Answer the user now in plain text using the tool results "
+                                "already in the conversation; if data is missing, say so."),
+                })
+                return True
+
             start_time = time.monotonic()
             # Lemonade multiplexes several recipes (llamacpp, whispercpp, kokoro, ...)
             # so only its NPU-recipe models actually run on the NPU -
@@ -7160,6 +7360,14 @@ def api_chat():
                 loop_messages = list(messages)
                 if tools_list:
                     tool_instruction = (
+                        "Before calling any tool, decide internally which route fits this message: "
+                        "(1) stable/general knowledge, or a question already covered by the supplied live "
+                        "search evidence — answer directly with no tool call; (2) the supplied evidence is "
+                        "stale, partial, or contradictory — use the Playwright browser tools to verify from "
+                        "an authoritative source; (3) arithmetic or data processing — use the Python tool; "
+                        "(4) the user explicitly asks to interact with a page — use the browser interaction "
+                        "tools. Make this decision quietly: never narrate the choice or your reasoning in the "
+                        "answer. "
                         "Live web tools are available on every turn. Use live search evidence already supplied "
                         "when it covers the question; otherwise use the browser tools proactively for anything "
                         "time-sensitive, current, or uncertain rather than answering from memory alone. "
@@ -7293,6 +7501,11 @@ def api_chat():
                             if obj.get("usage"):
                                 usage = obj["usage"]
                     if not tools_list or cancel_event.is_set() or finish_reason != "tool_calls" or not round_tool_calls:
+                        # A model can stop immediately after the tool results with no
+                        # prose at all. Nudge it here, before the loop exits, or the
+                        # user only ever sees the streaming tool markers.
+                        if _ask_for_tool_answer():
+                            continue
                         break
                     if tool_round >= max_tool_rounds:
                         tool_round_limited = True
@@ -7343,7 +7556,7 @@ def api_chat():
                         # Visible in the chat bubble via the same content-delta channel the
                         # model's own text uses - no frontend change needed to show it.
                         marker = f"\n\n🔧 *Calling `{tc_name}`...*\n"
-                        assistant_parts.append(marker)
+                        tool_status_parts.append(marker)
                         result_queue.put(
                             f"data: {json.dumps({'choices': [{'delta': {'content': marker}}]})}\n\n"
                         )
@@ -7373,7 +7586,14 @@ def api_chat():
                                         "the verified results already collected and name "
                                         "any missing information."),
                         })
-                if not cancel_event.is_set() and not (assistant_parts or reasoning_parts or source_reply):
+                    # Finished a tool round without prose: ask for the answer from the
+                    # results rather than ending the turn on the activity markers.
+                    if _ask_for_tool_answer():
+                        continue
+                # Outside the loop: a turn that finished without tool calls and
+                # without any prose still has no answer to show the user.
+                has_prose = any(part.strip() for part in assistant_parts + reasoning_parts)
+                if not cancel_event.is_set() and not has_prose and not source_reply:
                     raise backend_error("The model returned no reply. Retry the message.")
             except Exception as exc:
                 detail = str(exc) if isinstance(exc, backend_error) else "llama_web could not complete this chat request."

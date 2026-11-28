@@ -147,18 +147,23 @@ automatic.
 - The call uses the model selected in Chat (local llama.cpp or opencode.ai). Change
   it in Chat before calling. A silent reply retries the selected model rather than
   switching models.
-- Speech recognition uses local faster-whisper, with browser live transcription
-  where supported. Speech uses local Kokoro `af_heart`, with Piper as a fallback;
-  override with `LLAMA_WEB_TTS_VOICE`.
-- Voice questions use the same live-search and MCP tool routing as chat. Playwright
-  read tools are available on every turn when web search is enabled, calculation and
-  script requests use the local Python tool, and tool results are fed back before
-  the spoken answer.
-- Each complete sentence is spoken as soon as it streams in. Status shows
+- Speech recognition uses local faster-whisper as the primary source; browser live
+  transcription is only a fallback if local transcription fails. Whisper auto-detects
+  the language by default. Set `LLAMA_WEB_STT_LANGUAGE` (for example `hi`) to pin one,
+  and `LLAMA_WEB_STT_MODEL` to change the model (default `small`). Speech uses local
+  Kokoro `af_heart`, with Piper as a fallback; override with `LLAMA_WEB_TTS_VOICE`.
+- Voice questions use the same live-search and MCP tool routing as chat. The assistant
+  first decides internally whether the question needs any tool: it answers directly
+  from knowledge or supplied live-search evidence when that is enough, and uses the
+  Playwright browser tools only for current, uncertain, or missing facts. Calculation
+  and script requests use the local Python tool, and tool results are fed back before
+  the spoken answer. That decision is never narrated in the reply.
+- The spoken turn is kept short: the reply is capped, thinking text is removed, and
+  long captions scroll inside the panel instead of resizing it. Status shows
   "Listening…" only while speech is captured, then "Ready — start speaking".
 - Chat's spoken-response mode is muted while the call is open, so only the globe
   speaks. Each spoken turn is saved in the current chat conversation.
-- Hosted replies time out after 45 s, local ones after 90 s. No LM Studio or
+- All replies use a 90 s timeout. No LM Studio or
   Lemonade is involved.
 - Voice models are cached under `~/.local/share/llama-web/voice/`; the installer
   prefetches them. `ffmpeg` must be available on `PATH`.
@@ -175,6 +180,11 @@ opencode.ai, so hosted assignments run at hosted speed. Online tasks use shorter
 timeouts than local GPU tasks. Gateway requests, including Tailscale clients, are
 shown in **Live logs** with the source label `tailscale`. Generated OpenCode configs
 are shown in the Help panel; the desktop OpenCode config is never rewritten automatically.
+A generated config expresses the compaction buffer as a percentage of the active model's
+window, so a session switched to a hosted model keeps the same headroom and compacts
+before the provider's input limit. Retained history is sized from the largest online
+model's maximum context, capped at half that window so a summary still leaves room
+for new work.
 
 The app starts a persistent supervisor. If a new assignment reports that it is not
 running, restart llama-web:

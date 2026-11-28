@@ -231,6 +231,30 @@ def gguf_max_context(path: Path) -> int | None:
     return None
 
 
+_SPLIT_SHARD_RE = re.compile(r"^(?P<base>.+)-(?P<index>\d{5})-of-(?P<count>\d{5})\.gguf$", re.I)
+
+
+def _split_shard_status(path: Path) -> tuple[bool, str]:
+    """A split GGUF needs every shard; a partial download is not loadable."""
+    match = _SPLIT_SHARD_RE.match(path.name)
+    if not match:
+        return True, ""
+    count = int(match.group("count"))
+    if count <= 1:
+        return True, ""
+    missing = []
+    for index in range(1, count + 1):
+        shard = path.with_name(
+            f"{match.group('base')}-{index:05d}-of-{count:05d}.gguf")
+        if not shard.is_file():
+            missing.append(shard.name)
+    if not missing:
+        return True, ""
+    return False, (f"Incomplete split GGUF: {len(missing)} of {count} shard files are "
+                   f"missing (starting with {missing[0]}). Download the full set "
+                   f"before loading this model.")
+
+
 def list_models() -> list[dict]:
     """List llama-web GGUFs using database metadata, marking the served one from the
     engine. No GGUF headers or library directory scans happen here."""
@@ -255,6 +279,7 @@ def list_models() -> list[dict]:
         context = served_context if loaded else None
         if not isinstance(context, int) or isinstance(context, bool) or context <= 0:
             context = default_context
+        loadable, shard_hint = _split_shard_status(path)
         models.append({
             "id": row["model_id"],
             "name": row["name"],
@@ -272,6 +297,8 @@ def list_models() -> list[dict]:
             "deletable": True,
             "lan_compatible": True,
             "context_editable": True,
+            "loadable": loadable,
+            "management_hint": shard_hint,
         })
     # The engine may serve a GGUF outside the managed library. Keep it visible and
     # unloadable; its only metadata comes from the engine itself, not from a file.
