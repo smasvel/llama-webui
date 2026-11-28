@@ -150,8 +150,10 @@ automatic.
 - Speech recognition uses local faster-whisper as the primary source; browser live
   transcription is only a fallback if local transcription fails. Whisper auto-detects
   the language by default. Set `LLAMA_WEB_STT_LANGUAGE` (for example `hi`) to pin one,
-  and `LLAMA_WEB_STT_MODEL` to change the model (default `small`). Speech uses local
-  Kokoro `af_heart`, with Piper as a fallback; override with `LLAMA_WEB_TTS_VOICE`.
+  and `LLAMA_WEB_STT_MODEL` to change the model (default `small`). English replies use
+  local Kokoro `af_heart`, with Piper as a fallback; Tamil and Hindi replies use local
+  eSpeak NG (`ta`/`hi`) so the English voice does not mangle them. Override the English
+  voice with `LLAMA_WEB_TTS_VOICE`.
 - Voice questions use the same live-search and MCP tool routing as chat. The assistant
   first decides internally whether the question needs any tool: it answers directly
   from knowledge or supplied live-search evidence when that is enough, and uses the

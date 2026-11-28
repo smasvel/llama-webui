@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -68,12 +69,44 @@ def _kokoro_instance():
     return _kokoro or None
 
 
+def _espeak_voice_for_text(text: str) -> str | None:
+    """Kokoro's default voice is English-only; don't feed it Indic scripts."""
+    if re.search(r"[\u0B80-\u0BFF]", text):
+        return "ta"
+    if re.search(r"[\u0900-\u097F]", text):
+        return "hi"
+    return None
+
+
+def _synthesize_espeak(text: str, language: str) -> bytes:
+    executable = shutil.which("espeak-ng") or shutil.which("espeak")
+    if not executable:
+        raise VoiceError("espeak-ng is required for Tamil/Hindi speech; install it with ffmpeg.")
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as out:
+        output = Path(out.name)
+    try:
+        result = subprocess.run(
+            [executable, "-v", language, "-s", "160", "-w", str(output)],
+            input=text.encode(), capture_output=True, timeout=60,
+        )
+        if result.returncode != 0:
+            raise VoiceError(result.stderr.decode(errors="replace")[:300] or "eSpeak failed.")
+        return output.read_bytes()
+    finally:
+        output.unlink(missing_ok=True)
+
+
 def synthesize(text: str, voice: str | None = None) -> bytes:
     """Synthesize text to WAV bytes with local Kokoro (or Piper fallback)."""
     text = (text or "").strip()
     if not text:
         raise VoiceError("No text to speak.")
     voice = voice or DEFAULT_VOICE
+    script_voice = _espeak_voice_for_text(text)
+    if script_voice:
+        # English Kokoro voices phonetically mangle Tamil/Hindi, which can sound
+        # like Spanish or random words at the end of an otherwise correct reply.
+        return _synthesize_espeak(text, script_voice)
     kokoro = _kokoro_instance()
     if kokoro is not None and voice not in _VOICE_PATHS:
         try:

@@ -21,8 +21,9 @@ models are available as an optional online backend.
   emoji and shortcodes.
 - **Voice call** from the composer's phone button: an animated globe listens,
   transcribes and replies automatically. Local faster-whisper is the primary
-  speech-to-text engine, with browser transcription only as a fallback; local Kokoro
-  handles speech. The call uses the model selected in Chat, speaks short replies and
+  speech-to-text engine, with browser transcription only as a fallback; English uses
+  local Kokoro, while Tamil and Hindi use local eSpeak NG so they are not mispronounced
+  by the English voice. The call uses the model selected in Chat, speaks short replies and
   saves each exchange to the transcript. It can research live topics or run local
   Python work through the same MCP tools as typed chat, then speak a short summary.
 - Live web search with citations, plus Playwright browser and Python REPL MCP tools.

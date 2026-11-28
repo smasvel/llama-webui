@@ -348,6 +348,17 @@ class LlamaVoiceTests(unittest.TestCase):
         self.assertEqual(response.data, b"RIFFfake-wave")
         synth.assert_called_once()
 
+    def test_tamil_speech_uses_espeak_instead_of_english_kokoro(self):
+        self.assertEqual(local_tts._espeak_voice_for_text("வணக்கம்"), "ta")
+        self.assertEqual(local_tts._espeak_voice_for_text("नमस्ते"), "hi")
+        self.assertIsNone(local_tts._espeak_voice_for_text("hello"))
+        with patch.object(local_tts, "_synthesize_espeak", return_value=b"ta-wav") as espeak, \
+             patch.object(local_tts, "_kokoro_instance") as kokoro:
+            audio = local_tts.synthesize("வணக்கம், எப்படி இருக்கீங்க?")
+        self.assertEqual(audio, b"ta-wav")
+        espeak.assert_called_once_with("வணக்கம், எப்படி இருக்கீங்க?", "ta")
+        kokoro.assert_not_called()
+
     def test_voice_error_is_actionable(self):
         with patch.object(local_stt, "transcribe", side_effect=local_stt.VoiceError("no local model")):
             response = self.client.post(
