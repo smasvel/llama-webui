@@ -118,6 +118,8 @@ class LlamaVoiceTests(unittest.TestCase):
         self.assertIn("Before any tool call", seen["system"])
         self.assertIn("decide internally", seen["system"])
         self.assertIn("chat-temp/", seen["system"])
+        self.assertIn("Today is", seen["system"])
+        self.assertIn("ignore events that have already happened", seen["system"])
 
     def test_voice_disables_reasoning_and_uses_snippet_only_search(self):
         seen = {}
