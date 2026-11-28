@@ -38,6 +38,11 @@ backups/
 *.pem
 *.key
 
+# Local scratch artifacts from online/remote search probes
+/*-yahoo-*.json
+/*-remote-search-*.json
+/*-search-temp-*.json
+
 # Local scratch artifacts
 /.html
 /True
