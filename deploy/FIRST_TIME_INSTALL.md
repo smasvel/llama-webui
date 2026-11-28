@@ -35,7 +35,8 @@ The script installs missing Ubuntu packages, starts PostgreSQL from
   `server.conf`),
 - installs the app and the `llama_web` package into `~/.local/share/llama-web/`,
 - installs the local Playwright MCP runtime and Chromium for browser tools,
-- installs the local voice models (faster-whisper, Kokoro and Piper fallback) under
+- installs the local voice models (faster-whisper, Kokoro and the neural Tamil Piper
+  voice) under
   `~/.local/share/llama-web/voice/`; `ffmpeg` must be available on `PATH`,
 - installs and enables the `llama-web.service`, `llama-web-engine.service` and
   `llama-web-caddy.service` user units.
@@ -151,9 +152,9 @@ automatic.
   transcription is only a fallback if local transcription fails. Whisper auto-detects
   the language by default. Set `LLAMA_WEB_STT_LANGUAGE` (for example `hi`) to pin one,
   and `LLAMA_WEB_STT_MODEL` to change the model (default `small`). English replies use
-  local Kokoro `af_heart`, with Piper as a fallback; Tamil and Hindi replies use local
-  eSpeak NG (`ta`/`hi`) so the English voice does not mangle them. Override the English
-  voice with `LLAMA_WEB_TTS_VOICE`.
+  local Kokoro `af_heart`, with Piper as a fallback; Tamil uses the neural Piper Rasa
+  Female voice, and Hindi uses Kokoro's Hindi voice. eSpeak NG (`ta`/`hi`) is only a
+  last-resort fallback. Override the English voice with `LLAMA_WEB_TTS_VOICE`.
 - Voice questions use the same live-search and MCP tool routing as chat. The assistant
   first decides internally whether the question needs any tool: it answers directly
   from knowledge or supplied live-search evidence when that is enough, and uses the

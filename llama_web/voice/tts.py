@@ -29,6 +29,10 @@ _VOICE_PATHS = {
     "en_US-lessac-medium": "en/en_US/lessac/medium/en_US-lessac-medium.onnx",
     "en_US-lessac-low": "en/en_US/lessac/low/en_US-lessac-low.onnx",
     "en_GB-alan-medium": "en/en_GB/alan/medium/en_GB-alan-medium.onnx",
+    "ta_IN-rasa_female-medium": "ta_IN-rasa_female-medium.onnx",
+}
+_VOICE_REPOS = {
+    "ta_IN-rasa_female-medium": "tinisoft/piper-ta_IN-rasa_female-medium",
 }
 
 
@@ -45,12 +49,13 @@ def _model_path(voice: str) -> Path:
             raise VoiceError(f"Unknown local voice: {voice}")
         target = _CACHE_DIR / "tts"
         target.mkdir(parents=True, exist_ok=True)
+        repo = _VOICE_REPOS.get(voice, _REPO)
         try:
-            model = Path(hf_hub_download(_REPO, relative, cache_dir=str(target)))
+            model = Path(hf_hub_download(repo, relative, cache_dir=str(target)))
         except Exception as exc:
             raise VoiceError(f"Could not download the local voice model: {exc}") from exc
         _VOICES[voice] = model
-        config = Path(hf_hub_download(_REPO, relative + ".json", cache_dir=str(target)))
+        config = Path(hf_hub_download(repo, relative + ".json", cache_dir=str(target)))
         _CONFIGS[voice] = config
         return model
 
@@ -96,27 +101,7 @@ def _synthesize_espeak(text: str, language: str) -> bytes:
         output.unlink(missing_ok=True)
 
 
-def synthesize(text: str, voice: str | None = None) -> bytes:
-    """Synthesize text to WAV bytes with local Kokoro (or Piper fallback)."""
-    text = (text or "").strip()
-    if not text:
-        raise VoiceError("No text to speak.")
-    voice = voice or DEFAULT_VOICE
-    script_voice = _espeak_voice_for_text(text)
-    if script_voice:
-        # English Kokoro voices phonetically mangle Tamil/Hindi, which can sound
-        # like Spanish or random words at the end of an otherwise correct reply.
-        return _synthesize_espeak(text, script_voice)
-    kokoro = _kokoro_instance()
-    if kokoro is not None and voice not in _VOICE_PATHS:
-        try:
-            import soundfile as sf
-            audio, rate = kokoro.create(text, voice=voice, speed=1.05)
-            out = io.BytesIO()
-            sf.write(out, audio, rate, format="WAV")
-            return out.getvalue()
-        except Exception:
-            pass  # fall through to Piper
+def _synthesize_piper(text: str, voice: str) -> bytes:
     bundled = Path(sys.executable).parent / "piper"
     executable = str(bundled) if bundled.is_file() else shutil.which("piper")
     if not executable:
@@ -135,3 +120,42 @@ def synthesize(text: str, voice: str | None = None) -> bytes:
         return output.read_bytes()
     finally:
         output.unlink(missing_ok=True)
+
+
+def _synthesize_kokoro(text: str, voice: str, speed: float = 1.05) -> bytes:
+    import soundfile as sf
+    audio, rate = _kokoro_instance().create(text, voice=voice, speed=speed)
+    out = io.BytesIO()
+    sf.write(out, audio, rate, format="WAV")
+    return out.getvalue()
+
+
+def synthesize(text: str, voice: str | None = None) -> bytes:
+    """Synthesize text with natural local neural voices for each script."""
+    text = (text or "").strip()
+    if not text:
+        raise VoiceError("No text to speak.")
+    voice = voice or DEFAULT_VOICE
+    script_voice = _espeak_voice_for_text(text)
+    if script_voice == "ta":
+        # Neural Piper Tamil (Rasa Female, CC-BY-4.0). The eSpeak voice is only a
+        # fallback when the model cannot be downloaded; it is much more robotic.
+        try:
+            return _synthesize_piper(text, "ta_IN-rasa_female-medium")
+        except VoiceError:
+            return _synthesize_espeak(text, "ta")
+    if script_voice == "hi":
+        kokoro = _kokoro_instance()
+        if kokoro is not None:
+            try:
+                return _synthesize_kokoro(text, "hf_alpha", speed=1.0)
+            except Exception:
+                pass
+        return _synthesize_espeak(text, "hi")
+    kokoro = _kokoro_instance()
+    if kokoro is not None and voice not in _VOICE_PATHS:
+        try:
+            return _synthesize_kokoro(text, voice)
+        except Exception:
+            pass  # fall through to Piper
+    return _synthesize_piper(text, voice)

@@ -348,16 +348,36 @@ class LlamaVoiceTests(unittest.TestCase):
         self.assertEqual(response.data, b"RIFFfake-wave")
         synth.assert_called_once()
 
-    def test_tamil_speech_uses_espeak_instead_of_english_kokoro(self):
+    def test_tamil_speech_uses_neural_piper_not_english_kokoro(self):
         self.assertEqual(local_tts._espeak_voice_for_text("வணக்கம்"), "ta")
         self.assertEqual(local_tts._espeak_voice_for_text("नमस्ते"), "hi")
         self.assertIsNone(local_tts._espeak_voice_for_text("hello"))
-        with patch.object(local_tts, "_synthesize_espeak", return_value=b"ta-wav") as espeak, \
+        text = "வணக்கம், எப்படி இருக்கீங்க?"
+        with patch.object(local_tts, "_synthesize_piper", return_value=b"ta-wav") as piper, \
+             patch.object(local_tts, "_synthesize_espeak") as espeak, \
              patch.object(local_tts, "_kokoro_instance") as kokoro:
-            audio = local_tts.synthesize("வணக்கம், எப்படி இருக்கீங்க?")
+            audio = local_tts.synthesize(text)
         self.assertEqual(audio, b"ta-wav")
-        espeak.assert_called_once_with("வணக்கம், எப்படி இருக்கீங்க?", "ta")
+        piper.assert_called_once_with(text, "ta_IN-rasa_female-medium")
+        espeak.assert_not_called()
         kokoro.assert_not_called()
+
+    def test_tamil_piper_failure_falls_back_to_espeak(self):
+        with patch.object(local_tts, "_synthesize_piper",
+                          side_effect=local_tts.VoiceError("no model")), \
+             patch.object(local_tts, "_synthesize_espeak", return_value=b"espeak-wav") as espeak:
+            audio = local_tts.synthesize("வணக்கம்")
+        self.assertEqual(audio, b"espeak-wav")
+        espeak.assert_called_once_with("வணக்கம்", "ta")
+
+    def test_hindi_speech_uses_kokoro_hindi_voice(self):
+        with patch.object(local_tts, "_kokoro_instance", return_value=object()), \
+             patch.object(local_tts, "_synthesize_kokoro", return_value=b"hi-wav") as kokoro, \
+             patch.object(local_tts, "_synthesize_espeak") as espeak:
+            audio = local_tts.synthesize("नमस्ते")
+        self.assertEqual(audio, b"hi-wav")
+        kokoro.assert_called_once_with("नमस्ते", "hf_alpha", speed=1.0)
+        espeak.assert_not_called()
 
     def test_voice_error_is_actionable(self):
         with patch.object(local_stt, "transcribe", side_effect=local_stt.VoiceError("no local model")):

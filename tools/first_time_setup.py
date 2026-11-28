@@ -304,7 +304,11 @@ def download_voice_models():
     print(f'Preparing local voice models ({local_stt._model_name()} STT, '
           f'{local_tts.DEFAULT_VOICE} TTS)...')
     local_stt._get_model()
-    local_tts._model_path(local_tts.DEFAULT_VOICE)
+    if local_tts.DEFAULT_VOICE in local_tts._VOICE_PATHS:
+        local_tts._model_path(local_tts.DEFAULT_VOICE)
+    # Tamil uses a neural Piper voice; prefetch it so the first Tamil turn is
+    # not delayed by a model download.
+    local_tts._model_path("ta_IN-rasa_female-medium")
     base = ('https://github.com/thewh1teagle/kokoro-onnx/releases/download/'
             'model-files-v1.0/')
     for target, filename in ((local_tts.KOKORO_MODEL, 'kokoro-v1.0.onnx'),
